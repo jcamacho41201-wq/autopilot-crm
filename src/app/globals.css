@@ -862,6 +862,41 @@ textarea {
   justify-items: start;
 }
 
+.service-category-group {
+  display: grid;
+  gap: 10px;
+}
+
+.service-category-group h3 {
+  color: var(--brand);
+}
+
+.checkbox-grid {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 2px;
+}
+
+.checkbox-row {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-weight: 700;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.checkbox-row input {
+  width: 18px;
+  min-height: 18px;
+}
+
 .modal-details[open]::before {
   content: "";
   position: fixed;

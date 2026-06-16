@@ -33,6 +33,10 @@ function optionalDateValue(formData: FormData, key: string) {
   return raw ? new Date(raw) : null;
 }
 
+function stringValues(formData: FormData, key: string) {
+  return formData.getAll(key).map((value) => String(value)).filter(Boolean);
+}
+
 function returnTo(formData: FormData, fallback: string) {
   const value = stringValue(formData, "returnTo", fallback);
   return value.startsWith("/app") ? value : fallback;
@@ -181,6 +185,34 @@ export async function signupAction(formData: FormData) {
     include: { users: true }
   });
   await prisma.shop.update({ where: { id: shop.id }, data: { bookingLink: `/booking/${shop.slug}` } });
+  const services = await prisma.service.findMany({ where: { shopId: shop.id } });
+  const byName = new Map(services.map((service) => [service.name, service]));
+  const basic = await prisma.servicePackage.create({
+    data: {
+      shopId: shop.id,
+      name: "Basic Maintenance Package",
+      description: "Oil change, tire rotation, and brake inspection."
+    }
+  });
+  const major = await prisma.servicePackage.create({
+    data: {
+      shopId: shop.id,
+      name: "Major Service Package",
+      description: "Core long-term maintenance services for higher-value follow-up."
+    }
+  });
+  await prisma.servicePackageItem.createMany({
+    data: [
+      ...["Oil change", "Tire rotation", "Brake inspection"]
+        .map((name) => byName.get(name))
+        .filter(Boolean)
+        .map((service) => ({ packageId: basic.id, serviceId: service!.id })),
+      ...["Oil change", "Coolant flush", "Transmission service", "Spark plugs"]
+        .map((name) => byName.get(name))
+        .filter(Boolean)
+        .map((service) => ({ packageId: major.id, serviceId: service!.id }))
+    ]
+  });
   await createSession(shop.users[0].id);
   redirect("/app");
 }
@@ -235,7 +267,7 @@ export async function createCustomerWithVehicleAction(formData: FormData) {
     include: { vehicles: true }
   });
   const vehicle = customer.vehicles[0];
-  const services = await prisma.service.findMany({ where: { shopId: user.shopId } });
+  const services = await prisma.service.findMany({ where: { shopId: user.shopId, status: "ACTIVE" } });
   if (vehicle && services.length) {
     await prisma.maintenanceItem.createMany({
       data: services.map((service) => ({
@@ -320,7 +352,7 @@ export async function createVehicleAction(formData: FormData) {
       mileageLogs: { create: { mileage: currentMileage, loggedAt: new Date(), source: "onboarding" } }
     }
   });
-  const services = await prisma.service.findMany({ where: { shopId: user.shopId } });
+  const services = await prisma.service.findMany({ where: { shopId: user.shopId, status: "ACTIVE" } });
   await prisma.maintenanceItem.createMany({
     data: services.map((service) => ({
       vehicleId: vehicle.id,
@@ -615,18 +647,26 @@ export async function createMaintenanceItemAction(formData: FormData) {
   });
   if (!vehicle) return;
   const fallback = returnTo(formData, "/app/maintenance");
-  const mileageInterval = requiredMileage(formData, "mileageInterval");
+  const serviceId = stringValue(formData, "serviceId") || null;
+  const service = serviceId ? await prisma.service.findFirst({ where: { id: serviceId, shopId: user.shopId } }) : null;
+  const mileageInterval = requiredMileage(formData, "mileageInterval") ?? service?.defaultMileageInterval ?? null;
   if (mileageInterval === null || mileageInterval <= 0) failWithMessage(formData, fallback, "Mileage interval must be greater than zero.");
+  const timeIntervalMonths = optionalNumberValue(formData, "timeIntervalMonths") ?? service?.defaultTimeIntervalMonths ?? 6;
+  const averagePrice = optionalNumberValue(formData, "averagePrice") ?? service?.averagePrice ?? 0;
+  const reminderThreshold = optionalNumberValue(formData, "reminderThresholdPercentage") ?? service?.defaultReminderThreshold ?? 20;
+  const existing = service ? await prisma.maintenanceItem.findFirst({ where: { vehicleId, serviceId: service.id } }) : null;
+  if (existing && service) failWithMessage(formData, fallback, `${service.name} is already assigned to this vehicle.`);
   await prisma.maintenanceItem.create({
     data: {
       vehicleId,
-      name: stringValue(formData, "name"),
+      serviceId: service?.id ?? null,
+      name: service?.name ?? stringValue(formData, "name"),
       lastCompletedDate: dateValue(formData, "lastCompletedDate", new Date()),
       lastCompletedMileage: numberValue(formData, "lastCompletedMileage", vehicle.currentMileage),
       mileageInterval,
-      timeIntervalMonths: Math.max(1, numberValue(formData, "timeIntervalMonths", 6)),
-      averagePrice: Math.max(0, numberValue(formData, "averagePrice", 0)),
-      reminderThresholdPercentage: Math.max(0, Math.min(100, numberValue(formData, "reminderThresholdPercentage", 20))),
+      timeIntervalMonths: Math.max(1, timeIntervalMonths),
+      averagePrice: Math.max(0, averagePrice),
+      reminderThresholdPercentage: Math.max(0, Math.min(100, reminderThreshold)),
       remindersEnabled: formData.get("remindersEnabled") === "on",
       status: stringValue(formData, "status", "ACTIVE")
     }
@@ -1084,6 +1124,208 @@ export async function createTechnicianAction(formData: FormData) {
   revalidatePath("/app/team");
 }
 
+export async function createServiceLibraryAction(formData: FormData) {
+  const user = await requireUser();
+  await prisma.service.create({
+    data: {
+      shopId: user.shopId,
+      name: stringValue(formData, "name"),
+      category: stringValue(formData, "category", "Custom"),
+      defaultMileageInterval: Math.max(1, numberValue(formData, "defaultMileageInterval", 5000)),
+      defaultTimeIntervalMonths: Math.max(1, numberValue(formData, "defaultTimeIntervalMonths", 6)),
+      averagePrice: Math.max(0, numberValue(formData, "averagePrice", 0)),
+      defaultReminderThreshold: Math.max(0, Math.min(100, numberValue(formData, "defaultReminderThreshold", 20))),
+      description: stringValue(formData, "description") || null,
+      recommendedNotes: stringValue(formData, "recommendedNotes") || null,
+      status: stringValue(formData, "status", "ACTIVE")
+    }
+  });
+  revalidatePath("/app/settings/service-library");
+}
+
+export async function updateServiceLibraryAction(formData: FormData) {
+  const user = await requireUser();
+  const serviceId = stringValue(formData, "serviceId");
+  const service = await prisma.service.findFirst({ where: { id: serviceId, shopId: user.shopId } });
+  if (!service) return;
+  await prisma.service.update({
+    where: { id: service.id },
+    data: {
+      name: stringValue(formData, "name"),
+      category: stringValue(formData, "category", "Custom"),
+      defaultMileageInterval: Math.max(1, numberValue(formData, "defaultMileageInterval", service.defaultMileageInterval)),
+      defaultTimeIntervalMonths: Math.max(1, numberValue(formData, "defaultTimeIntervalMonths", service.defaultTimeIntervalMonths)),
+      averagePrice: Math.max(0, numberValue(formData, "averagePrice", service.averagePrice)),
+      defaultReminderThreshold: Math.max(0, Math.min(100, numberValue(formData, "defaultReminderThreshold", service.defaultReminderThreshold))),
+      description: stringValue(formData, "description") || null,
+      recommendedNotes: stringValue(formData, "recommendedNotes") || null,
+      status: stringValue(formData, "status", service.status)
+    }
+  });
+  revalidatePath("/app/settings/service-library");
+  revalidatePath("/app/maintenance");
+  revalidatePath("/app");
+}
+
+export async function duplicateServiceLibraryAction(formData: FormData) {
+  const user = await requireUser();
+  const service = await prisma.service.findFirst({ where: { id: stringValue(formData, "serviceId"), shopId: user.shopId } });
+  if (!service) return;
+  await prisma.service.create({
+    data: {
+      shopId: user.shopId,
+      name: `${service.name} Copy`,
+      category: service.category,
+      defaultMileageInterval: service.defaultMileageInterval,
+      defaultTimeIntervalMonths: service.defaultTimeIntervalMonths,
+      averagePrice: service.averagePrice,
+      defaultReminderThreshold: service.defaultReminderThreshold,
+      description: service.description,
+      recommendedNotes: service.recommendedNotes,
+      status: service.status
+    }
+  });
+  revalidatePath("/app/settings/service-library");
+}
+
+export async function archiveServiceLibraryAction(formData: FormData) {
+  const user = await requireUser();
+  const service = await prisma.service.findFirst({ where: { id: stringValue(formData, "serviceId"), shopId: user.shopId } });
+  if (!service) return;
+  await prisma.service.update({
+    where: { id: service.id },
+    data: { status: service.status === "ACTIVE" ? "INACTIVE" : "ACTIVE" }
+  });
+  revalidatePath("/app/settings/service-library");
+}
+
+export async function deleteServiceLibraryAction(formData: FormData) {
+  const user = await requireUser();
+  const serviceId = stringValue(formData, "serviceId");
+  const service = await prisma.service.findFirst({
+    where: { id: serviceId, shopId: user.shopId },
+    include: { maintenanceItems: true }
+  });
+  if (!service) return;
+  if (service.maintenanceItems.length && formData.get("confirmDelete") !== "on") {
+    failWithMessage(formData, "/app/settings/service-library", `This service is currently assigned to ${service.maintenanceItems.length} vehicle(s). Confirm delete first.`);
+  }
+  await prisma.service.delete({ where: { id: service.id } });
+  revalidatePath("/app/settings/service-library");
+  revalidatePath("/app/maintenance");
+}
+
+export async function createServicePackageAction(formData: FormData) {
+  const user = await requireUser();
+  const serviceIds = stringValues(formData, "serviceIds");
+  await prisma.servicePackage.create({
+    data: {
+      shopId: user.shopId,
+      name: stringValue(formData, "name"),
+      description: stringValue(formData, "description") || null,
+      status: stringValue(formData, "status", "ACTIVE"),
+      items: {
+        create: serviceIds.map((serviceId) => ({ serviceId }))
+      }
+    }
+  });
+  revalidatePath("/app/settings/service-library");
+}
+
+export async function updateServicePackageAction(formData: FormData) {
+  const user = await requireUser();
+  const packageId = stringValue(formData, "packageId");
+  const servicePackage = await prisma.servicePackage.findFirst({ where: { id: packageId, shopId: user.shopId } });
+  if (!servicePackage) return;
+  const serviceIds = stringValues(formData, "serviceIds");
+  await prisma.servicePackage.update({
+    where: { id: servicePackage.id },
+    data: {
+      name: stringValue(formData, "name"),
+      description: stringValue(formData, "description") || null,
+      status: stringValue(formData, "status", servicePackage.status),
+      items: {
+        deleteMany: {},
+        create: serviceIds.map((serviceId) => ({ serviceId }))
+      }
+    }
+  });
+  revalidatePath("/app/settings/service-library");
+}
+
+export async function deleteServicePackageAction(formData: FormData) {
+  const user = await requireUser();
+  const servicePackage = await prisma.servicePackage.findFirst({ where: { id: stringValue(formData, "packageId"), shopId: user.shopId } });
+  if (!servicePackage) return;
+  await prisma.servicePackage.delete({ where: { id: servicePackage.id } });
+  revalidatePath("/app/settings/service-library");
+}
+
+async function assignServicesToVehicle(params: {
+  shopId: string;
+  vehicleId: string;
+  serviceIds: string[];
+  fallback: string;
+}) {
+  const vehicle = await prisma.vehicle.findFirst({ where: { id: params.vehicleId, customer: { shopId: params.shopId } } });
+  if (!vehicle) return;
+  const services = await prisma.service.findMany({
+    where: { id: { in: params.serviceIds }, shopId: params.shopId, status: "ACTIVE" }
+  });
+  const existing = await prisma.maintenanceItem.findMany({
+    where: { vehicleId: vehicle.id, serviceId: { in: services.map((service) => service.id) } },
+    select: { serviceId: true }
+  });
+  const existingIds = new Set(existing.map((item) => item.serviceId).filter(Boolean));
+  const toCreate = services.filter((service) => !existingIds.has(service.id));
+  if (!toCreate.length) return;
+  await prisma.maintenanceItem.createMany({
+    data: toCreate.map((service) => ({
+      vehicleId: vehicle.id,
+      serviceId: service.id,
+      name: service.name,
+      lastCompletedDate: new Date(),
+      lastCompletedMileage: vehicle.currentMileage,
+      mileageInterval: service.defaultMileageInterval,
+      timeIntervalMonths: service.defaultTimeIntervalMonths,
+      averagePrice: service.averagePrice,
+      reminderThresholdPercentage: service.defaultReminderThreshold,
+      status: "ACTIVE",
+      remindersEnabled: true
+    }))
+  });
+  revalidatePath(params.fallback);
+  revalidatePath(vehicleDashboardPath(vehicle.customerId, vehicle.id));
+  revalidatePath("/app/maintenance");
+  revalidatePath("/app");
+}
+
+export async function applyServicePackageAction(formData: FormData) {
+  const user = await requireUser();
+  const packageId = stringValue(formData, "packageId");
+  const servicePackage = await prisma.servicePackage.findFirst({
+    where: { id: packageId, shopId: user.shopId, status: "ACTIVE" },
+    include: { items: true }
+  });
+  if (!servicePackage) return;
+  await assignServicesToVehicle({
+    shopId: user.shopId,
+    vehicleId: stringValue(formData, "vehicleId"),
+    serviceIds: servicePackage.items.map((item) => item.serviceId),
+    fallback: returnTo(formData, "/app/customers")
+  });
+}
+
+export async function applyRecommendedServicesAction(formData: FormData) {
+  const user = await requireUser();
+  await assignServicesToVehicle({
+    shopId: user.shopId,
+    vehicleId: stringValue(formData, "vehicleId"),
+    serviceIds: stringValues(formData, "serviceIds"),
+    fallback: returnTo(formData, "/app/customers")
+  });
+}
+
 export async function updateShopAction(formData: FormData) {
   const user = await requireUser();
   await prisma.shop.update({
@@ -1120,14 +1362,14 @@ export async function ensureDemoLogin() {
 
 function defaultServices() {
   return [
-    { name: "Oil change", defaultMileageInterval: 5000, defaultTimeIntervalMonths: 6, averagePrice: 90, defaultReminderThreshold: 20 },
-    { name: "Tire rotation", defaultMileageInterval: 6000, defaultTimeIntervalMonths: 6, averagePrice: 65, defaultReminderThreshold: 15 },
-    { name: "Brake inspection", defaultMileageInterval: 12000, defaultTimeIntervalMonths: 12, averagePrice: 120, defaultReminderThreshold: 10 },
-    { name: "Transmission service", defaultMileageInterval: 60000, defaultTimeIntervalMonths: 48, averagePrice: 320, defaultReminderThreshold: 15 },
-    { name: "Coolant flush", defaultMileageInterval: 30000, defaultTimeIntervalMonths: 36, averagePrice: 180, defaultReminderThreshold: 15 },
-    { name: "Spark plugs", defaultMileageInterval: 90000, defaultTimeIntervalMonths: 72, averagePrice: 420, defaultReminderThreshold: 10 },
-    { name: "Air filter", defaultMileageInterval: 15000, defaultTimeIntervalMonths: 12, averagePrice: 55, defaultReminderThreshold: 20 },
-    { name: "Cabin filter", defaultMileageInterval: 15000, defaultTimeIntervalMonths: 12, averagePrice: 55, defaultReminderThreshold: 20 },
-    { name: "Battery inspection", defaultMileageInterval: 12000, defaultTimeIntervalMonths: 12, averagePrice: 40, defaultReminderThreshold: 10 }
+    { name: "Oil change", category: "Fluids", defaultMileageInterval: 5000, defaultTimeIntervalMonths: 6, averagePrice: 90, defaultReminderThreshold: 20, description: "Standard engine oil and filter service." },
+    { name: "Tire rotation", category: "Inspection", defaultMileageInterval: 6000, defaultTimeIntervalMonths: 6, averagePrice: 65, defaultReminderThreshold: 15, description: "Rotate tires and inspect tread wear." },
+    { name: "Brake inspection", category: "Brakes", defaultMileageInterval: 12000, defaultTimeIntervalMonths: 12, averagePrice: 120, defaultReminderThreshold: 10, description: "Inspect pads, rotors, calipers, and brake fluid condition." },
+    { name: "Transmission service", category: "Fluids", defaultMileageInterval: 60000, defaultTimeIntervalMonths: 48, averagePrice: 320, defaultReminderThreshold: 15, description: "Transmission fluid and service inspection." },
+    { name: "Coolant flush", category: "Cooling System", defaultMileageInterval: 30000, defaultTimeIntervalMonths: 36, averagePrice: 180, defaultReminderThreshold: 15, description: "Cooling system flush and refill." },
+    { name: "Spark plugs", category: "Engine", defaultMileageInterval: 90000, defaultTimeIntervalMonths: 72, averagePrice: 420, defaultReminderThreshold: 10, description: "Replace spark plugs and inspect ignition components." },
+    { name: "Air filter", category: "Filters", defaultMileageInterval: 15000, defaultTimeIntervalMonths: 12, averagePrice: 55, defaultReminderThreshold: 20, description: "Replace engine air filter." },
+    { name: "Cabin filter", category: "Filters", defaultMileageInterval: 15000, defaultTimeIntervalMonths: 12, averagePrice: 55, defaultReminderThreshold: 20, description: "Replace cabin air filter." },
+    { name: "Battery inspection", category: "Electrical", defaultMileageInterval: 12000, defaultTimeIntervalMonths: 12, averagePrice: 40, defaultReminderThreshold: 10, description: "Test battery, charging, and starting system." }
   ];
 }

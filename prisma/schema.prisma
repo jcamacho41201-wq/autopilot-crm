@@ -23,6 +23,7 @@ model Shop {
   inventoryItems     InventoryItem[]
   reminderRules      ReminderRule[]
   services           Service[]
+  servicePackages    ServicePackage[]
   technicians        Technician[]
   scanLogs           InventoryScanLog[]
   serviceRecords     ServiceRecord[]
@@ -105,12 +106,41 @@ model Service {
   id                    String            @id @default(cuid())
   shopId                String
   name                  String
+  category              String            @default("Custom")
   defaultMileageInterval Int
   defaultTimeIntervalMonths Int
   averagePrice          Float
   defaultReminderThreshold Int             @default(20)
+  description           String?
+  recommendedNotes      String?
+  status                String            @default("ACTIVE")
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
   shop                  Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
   maintenanceItems      MaintenanceItem[]
+  packageItems          ServicePackageItem[]
+}
+
+model ServicePackage {
+  id          String               @id @default(cuid())
+  shopId      String
+  name        String
+  description String?
+  status      String               @default("ACTIVE")
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  shop        Shop                 @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  items       ServicePackageItem[]
+}
+
+model ServicePackageItem {
+  id        String         @id @default(cuid())
+  packageId String
+  serviceId String
+  package   ServicePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  service   Service        @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([packageId, serviceId])
 }
 
 model MaintenanceItem {

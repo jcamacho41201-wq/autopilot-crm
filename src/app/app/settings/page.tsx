@@ -1,4 +1,5 @@
-import { Save, UserPlus } from "lucide-react";
+import Link from "next/link";
+import { PackageSearch, Save, UserPlus } from "lucide-react";
 import { inviteUserAction, updateShopAction } from "@/lib/actions";
 import { canManage, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -37,6 +38,11 @@ export default async function SettingsPage() {
           </div>
         </div>
         <aside className="grid">
+          <div className="panel">
+            <h2>Service Library</h2>
+            <p>Manage reusable maintenance templates, default intervals, pricing, reminder thresholds, and service packages.</p>
+            <Link className="button secondary" href="/app/settings/service-library"><PackageSearch /> Open Service Library</Link>
+          </div>
           <form className="panel form" action={updateShopAction}>
             <h2>Shop Profile</h2>
             <label>Name<input name="name" defaultValue={user.shop.name} disabled={!isManager} /></label>

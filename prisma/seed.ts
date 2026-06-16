@@ -28,17 +28,17 @@ function daysFromNow(days: number, hour = 10) {
 }
 
 const services = [
-  { name: "Oil change", defaultMileageInterval: 5000, defaultTimeIntervalMonths: 6, averagePrice: 90, defaultReminderThreshold: 20 },
-  { name: "Tire rotation", defaultMileageInterval: 6000, defaultTimeIntervalMonths: 6, averagePrice: 65, defaultReminderThreshold: 15 },
-  { name: "Brake inspection", defaultMileageInterval: 12000, defaultTimeIntervalMonths: 12, averagePrice: 120, defaultReminderThreshold: 10 },
-  { name: "Brake pads", defaultMileageInterval: 40000, defaultTimeIntervalMonths: 36, averagePrice: 650, defaultReminderThreshold: 10 },
-  { name: "Brake rotors", defaultMileageInterval: 70000, defaultTimeIntervalMonths: 48, averagePrice: 820, defaultReminderThreshold: 10 },
-  { name: "Transmission service", defaultMileageInterval: 60000, defaultTimeIntervalMonths: 48, averagePrice: 320, defaultReminderThreshold: 15 },
-  { name: "Coolant flush", defaultMileageInterval: 30000, defaultTimeIntervalMonths: 36, averagePrice: 180, defaultReminderThreshold: 15 },
-  { name: "Spark plugs", defaultMileageInterval: 90000, defaultTimeIntervalMonths: 72, averagePrice: 420, defaultReminderThreshold: 10 },
-  { name: "Air filter", defaultMileageInterval: 15000, defaultTimeIntervalMonths: 12, averagePrice: 55, defaultReminderThreshold: 20 },
-  { name: "Cabin filter", defaultMileageInterval: 15000, defaultTimeIntervalMonths: 12, averagePrice: 55, defaultReminderThreshold: 20 },
-  { name: "Battery inspection", defaultMileageInterval: 12000, defaultTimeIntervalMonths: 12, averagePrice: 40, defaultReminderThreshold: 10 }
+  { name: "Oil change", category: "Fluids", defaultMileageInterval: 5000, defaultTimeIntervalMonths: 6, averagePrice: 90, defaultReminderThreshold: 20, description: "Standard oil and filter service." },
+  { name: "Tire rotation", category: "Inspection", defaultMileageInterval: 6000, defaultTimeIntervalMonths: 6, averagePrice: 65, defaultReminderThreshold: 15, description: "Rotate tires and inspect tread wear." },
+  { name: "Brake inspection", category: "Brakes", defaultMileageInterval: 12000, defaultTimeIntervalMonths: 12, averagePrice: 120, defaultReminderThreshold: 10, description: "Inspect pads, rotors, calipers, and brake fluid condition." },
+  { name: "Brake pads", category: "Brakes", defaultMileageInterval: 40000, defaultTimeIntervalMonths: 36, averagePrice: 650, defaultReminderThreshold: 10, description: "Replace brake pads and inspect braking hardware." },
+  { name: "Brake rotors", category: "Brakes", defaultMileageInterval: 70000, defaultTimeIntervalMonths: 48, averagePrice: 820, defaultReminderThreshold: 10, description: "Replace rotors when wear or runout requires service." },
+  { name: "Transmission service", category: "Fluids", defaultMileageInterval: 60000, defaultTimeIntervalMonths: 48, averagePrice: 320, defaultReminderThreshold: 15, description: "Transmission fluid and service inspection." },
+  { name: "Coolant flush", category: "Cooling System", defaultMileageInterval: 30000, defaultTimeIntervalMonths: 36, averagePrice: 180, defaultReminderThreshold: 15, description: "Cooling system flush and refill." },
+  { name: "Spark plugs", category: "Engine", defaultMileageInterval: 90000, defaultTimeIntervalMonths: 72, averagePrice: 420, defaultReminderThreshold: 10, description: "Replace spark plugs and inspect ignition components." },
+  { name: "Air filter", category: "Filters", defaultMileageInterval: 15000, defaultTimeIntervalMonths: 12, averagePrice: 55, defaultReminderThreshold: 20, description: "Replace engine air filter." },
+  { name: "Cabin filter", category: "Filters", defaultMileageInterval: 15000, defaultTimeIntervalMonths: 12, averagePrice: 55, defaultReminderThreshold: 20, description: "Replace cabin air filter." },
+  { name: "Battery inspection", category: "Electrical", defaultMileageInterval: 12000, defaultTimeIntervalMonths: 12, averagePrice: 40, defaultReminderThreshold: 10, description: "Test battery, charging, and starting system." }
 ];
 
 async function main() {
@@ -54,6 +54,7 @@ async function main() {
   await prisma.customer.deleteMany();
   await prisma.inventoryItem.deleteMany();
   await prisma.reminderRule.deleteMany();
+  await prisma.servicePackage.deleteMany();
   await prisma.service.deleteMany();
   await prisma.technician.deleteMany();
   await prisma.user.deleteMany();
@@ -110,6 +111,32 @@ async function main() {
 
   const createdServices = await prisma.service.findMany({ where: { shopId: shop.id } });
   const techs = await prisma.technician.findMany({ where: { shopId: shop.id } });
+  const serviceByName = new Map(createdServices.map((service) => [service.name, service]));
+  await prisma.servicePackage.createMany({
+    data: [
+      { shopId: shop.id, name: "Basic Maintenance Package", description: "Core interval services for everyday customer vehicles." },
+      { shopId: shop.id, name: "Major Service Package", description: "Higher-value interval services for long-term maintenance planning." }
+    ]
+  });
+  const packages = await prisma.servicePackage.findMany({ where: { shopId: shop.id } });
+  const basic = packages.find((pkg) => pkg.name === "Basic Maintenance Package");
+  const major = packages.find((pkg) => pkg.name === "Major Service Package");
+  if (basic) {
+    await prisma.servicePackageItem.createMany({
+      data: ["Oil change", "Tire rotation", "Brake inspection"]
+        .map((name) => serviceByName.get(name))
+        .filter(Boolean)
+        .map((service) => ({ packageId: basic.id, serviceId: service!.id }))
+    });
+  }
+  if (major) {
+    await prisma.servicePackageItem.createMany({
+      data: ["Oil change", "Coolant flush", "Transmission service", "Spark plugs"]
+        .map((name) => serviceByName.get(name))
+        .filter(Boolean)
+        .map((service) => ({ packageId: major.id, serviceId: service!.id }))
+    });
+  }
 
   const john = await prisma.customer.create({
     data: {

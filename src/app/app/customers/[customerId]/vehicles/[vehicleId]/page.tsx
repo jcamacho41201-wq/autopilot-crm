@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, CalendarPlus, CheckCircle2, Gauge, MessageSquareText, Plus, Save, Trash2, Wrench } from "lucide-react";
 import {
   addMileageAction,
+  applyRecommendedServicesAction,
+  applyServicePackageAction,
   createAppointmentAction,
   createMaintenanceItemAction,
   createServiceRecordAction,
@@ -16,7 +18,7 @@ import {
   updateVehicleAction
 } from "@/lib/actions";
 import { requireUser } from "@/lib/auth";
-import { dateLabel, dateTimeInputValue, money, yyyyMmDd } from "@/lib/format";
+import { dateLabel, dateTimeInputValue, money, number as numberFormat, yyyyMmDd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { estimateAnnualMiles, maintenancePrediction, type MaintenanceWithVehicle } from "@/lib/predictions";
 
@@ -93,13 +95,24 @@ export default async function VehicleDashboardPage({
     include: {
       customer: true,
       mileageLogs: { orderBy: { loggedAt: "desc" } },
-      maintenanceItems: true,
+      maintenanceItems: { include: { service: true } },
       serviceRecords: { orderBy: { serviceDate: "desc" }, take: 12 },
       appointments: { orderBy: { scheduledAt: "asc" }, take: 12 },
       opportunities: { where: { status: "OPEN" } }
     }
   });
   if (!vehicle) notFound();
+  const [libraryServices, servicePackages] = await Promise.all([
+    prisma.service.findMany({
+      where: { shopId: user.shopId, status: "ACTIVE" },
+      orderBy: [{ category: "asc" }, { name: "asc" }]
+    }),
+    prisma.servicePackage.findMany({
+      where: { shopId: user.shopId, status: "ACTIVE" },
+      include: { items: { include: { service: true } } },
+      orderBy: { name: "asc" }
+    })
+  ]);
 
   const annualMiles = estimateAnnualMiles({ ...vehicle, mileageLogs: vehicle.mileageLogs });
   const averageDailyMileage = Math.round(annualMiles / 365);
@@ -129,6 +142,22 @@ export default async function VehicleDashboardPage({
     .sort((a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime())[0];
   const lastReading = vehicle.mileageLogs[0];
   const vehiclePath = `/app/customers/${vehicle.customerId}/vehicles/${vehicle.id}`;
+  const assignedServiceIds = new Set(vehicle.maintenanceItems.map((item) => item.serviceId).filter(Boolean));
+  const unassignedServices = libraryServices.filter((service) => !assignedServiceIds.has(service.id));
+  const recommendedNames = new Set([
+    "Oil change",
+    "Tire rotation",
+    "Brake inspection",
+    "Coolant flush",
+    "Transmission service",
+    "Air filter",
+    "Cabin filter",
+    "Battery inspection",
+    ...(vehicle.make.toLowerCase().includes("jeep") || vehicle.vehicleType?.toLowerCase().includes("truck")
+      ? ["Differential Service", "Transfer Case Service"]
+      : [])
+  ]);
+  const recommendedServices = unassignedServices.filter((service) => recommendedNames.has(service.name));
 
   return (
     <>
@@ -261,21 +290,30 @@ export default async function VehicleDashboardPage({
               <details className="inline-details modal-details">
                 <summary className="button"><Plus /> Add Maintenance Item</summary>
                 <div className="modal-panel">
-                  <form className="form" action={createMaintenanceItemAction}>
+                  {unassignedServices.length ? <form className="form" action={createMaintenanceItemAction}>
                     <input type="hidden" name="vehicleId" value={vehicle.id} />
                     <input type="hidden" name="returnTo" value={vehiclePath} />
-                    <label>Service name<input name="name" required placeholder="Oil change" /></label>
+                    <label>Select Service
+                      <select name="serviceId" required>
+                        {unassignedServices.map((service) => (
+                          <option key={service.id} value={service.id}>
+                            {service.name} · {service.category} · {numberFormat.format(service.defaultMileageInterval)} mi / {service.defaultTimeIntervalMonths} mo · {money.format(service.averagePrice)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <div className="form-row">
                       <label>Last completed date<input name="lastCompletedDate" type="date" defaultValue={yyyyMmDd(new Date())} /></label>
                       <label>Last completed mileage<input name="lastCompletedMileage" type="number" min={0} defaultValue={vehicle.currentMileage} /></label>
                     </div>
+                    <p>Intervals, price, and reminder threshold come from the Service Library. Add overrides only when this vehicle needs a custom schedule.</p>
                     <div className="form-row">
-                      <label>Mileage interval<input name="mileageInterval" type="number" min={1} defaultValue={5000} /></label>
-                      <label>Time interval months<input name="timeIntervalMonths" type="number" min={1} defaultValue={6} /></label>
+                      <label>Override mileage interval<input name="mileageInterval" type="number" min={1} placeholder="Use library default" /></label>
+                      <label>Override time interval<input name="timeIntervalMonths" type="number" min={1} placeholder="Use library default" /></label>
                     </div>
                     <div className="form-row">
-                      <label>Estimated price<input name="averagePrice" type="number" min={0} step="0.01" defaultValue={120} /></label>
-                      <label>Reminder threshold %<input name="reminderThresholdPercentage" type="number" min={0} max={100} defaultValue={20} /></label>
+                      <label>Override price<input name="averagePrice" type="number" min={0} step="0.01" placeholder="Use library default" /></label>
+                      <label>Override reminder %<input name="reminderThresholdPercentage" type="number" min={0} max={100} placeholder="Use library default" /></label>
                     </div>
                     <label>Status
                       <select name="status" defaultValue="ACTIVE">
@@ -288,8 +326,62 @@ export default async function VehicleDashboardPage({
                     </label>
                     <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="remindersEnabled" defaultChecked /> Reminders enabled</label>
                     <button className="button" type="submit"><Wrench /> Add service</button>
-                  </form>
+                  </form> : (
+                    <div className="empty-state">
+                      <p>All active library services are already assigned to this vehicle.</p>
+                      <Link className="button secondary" href="/app/settings/service-library">Open Service Library</Link>
+                    </div>
+                  )}
                 </div>
+              </details>
+            </div>
+            <div className="grid grid-2" style={{ marginTop: 12 }}>
+              <details className="card detail-card">
+                <summary>
+                  <div>
+                    <strong>Apply Service Package</strong>
+                    <p>Add a predefined set of library services to this vehicle.</p>
+                  </div>
+                  <span className="badge">{servicePackages.length} packages</span>
+                </summary>
+                {servicePackages.length ? (
+                  <form className="form" action={applyServicePackageAction} style={{ marginTop: 12 }}>
+                    <input type="hidden" name="vehicleId" value={vehicle.id} />
+                    <input type="hidden" name="returnTo" value={vehiclePath} />
+                    <label>Package
+                      <select name="packageId">
+                        {servicePackages.map((pkg) => (
+                          <option key={pkg.id} value={pkg.id}>{pkg.name} · {pkg.items.length} services</option>
+                        ))}
+                      </select>
+                    </label>
+                    <button className="button secondary" type="submit"><Plus /> Apply package</button>
+                  </form>
+                ) : <p>No service packages yet. Create packages in Service Library.</p>}
+              </details>
+              <details className="card detail-card">
+                <summary>
+                  <div>
+                    <strong>Apply Recommended Services</strong>
+                    <p>Suggested services based on this vehicle profile.</p>
+                  </div>
+                  <span className="badge">{recommendedServices.length} suggested</span>
+                </summary>
+                {recommendedServices.length ? (
+                  <form className="form" action={applyRecommendedServicesAction} style={{ marginTop: 12 }}>
+                    <input type="hidden" name="vehicleId" value={vehicle.id} />
+                    <input type="hidden" name="returnTo" value={vehiclePath} />
+                    <div className="checkbox-grid">
+                      {recommendedServices.map((service) => (
+                        <label key={service.id} className="checkbox-row">
+                          <input type="checkbox" name="serviceIds" value={service.id} defaultChecked />
+                          {service.name}
+                        </label>
+                      ))}
+                    </div>
+                    <button className="button secondary" type="submit"><Plus /> Apply selected</button>
+                  </form>
+                ) : <p>No recommended unassigned services are available for this vehicle.</p>}
               </details>
             </div>
             <div className="table-wrap">
@@ -298,7 +390,20 @@ export default async function VehicleDashboardPage({
                 <tbody>
                   {rows.length ? rows.map(({ item, prediction }) => (
                     <tr key={item.id}>
-                      <td><strong>{item.name}</strong></td>
+                      <td>
+                        <strong>{item.name}</strong>
+                        <br />
+                        <span className="muted">
+                          {item.service
+                            ? item.mileageInterval !== item.service.defaultMileageInterval ||
+                              item.timeIntervalMonths !== item.service.defaultTimeIntervalMonths ||
+                              item.averagePrice !== item.service.averagePrice ||
+                              item.reminderThresholdPercentage !== item.service.defaultReminderThreshold
+                              ? "Using Custom Interval"
+                              : `Library: ${item.service.category}`
+                            : "Custom vehicle service"}
+                        </span>
+                      </td>
                       <td><span className={`badge ${prediction.statusTone}`}>{prediction.status}</span></td>
                       <td>{dateLabel(prediction.dueDate)}</td>
                       <td>{prediction.dueMileage.toLocaleString()} mi</td>
@@ -313,7 +418,11 @@ export default async function VehicleDashboardPage({
                           <form className="form compact-form" action={updateMaintenanceItemAction}>
                             <input type="hidden" name="maintenanceId" value={item.id} />
                             <input type="hidden" name="returnTo" value={vehiclePath} />
-                            <label>Service type<input name="name" defaultValue={item.name} required /></label>
+                            <input type="hidden" name="name" value={item.name} />
+                            <div className="card">
+                              <strong>{item.name}</strong>
+                              <p>{item.service ? `Defaults from Service Library: ${item.service.category}` : "Legacy custom service"}</p>
+                            </div>
                             <div className="form-row">
                               <label>Mileage interval<input name="mileageInterval" type="number" min={1} defaultValue={item.mileageInterval} required /></label>
                               <label>Time interval months<input name="timeIntervalMonths" type="number" min={1} defaultValue={item.timeIntervalMonths} required /></label>

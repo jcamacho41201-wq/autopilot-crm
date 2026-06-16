@@ -1,16 +1,9 @@
 import Link from "next/link";
-import { CalendarPlus, CheckCircle2, MessageSquareText, Pencil, Plus, Wrench } from "lucide-react";
-import {
-  completeServiceAction,
-  createAppointmentAction,
-  createMaintenanceItemAction,
-  deleteMaintenanceItemAction,
-  sendMockReminderAction,
-  updateMaintenanceItemAction
-} from "@/lib/actions";
+import { CalendarPlus, MessageSquareText, Send, Wrench } from "lucide-react";
+import { createAppointmentAction, sendMockReminderAction } from "@/lib/actions";
 import { requireUser } from "@/lib/auth";
-import { dateLabel, dateTimeInputValue, money, yyyyMmDd } from "@/lib/format";
-import { buildMaintenanceQueue, type MaintenanceQueueSource } from "@/lib/maintenanceQueue";
+import { dateLabel, dateTimeInputValue, money, number } from "@/lib/format";
+import { buildMaintenanceQueue, isOpenMaintenanceOpportunity, type MaintenanceQueueRow, type MaintenanceQueueSource } from "@/lib/maintenanceQueue";
 import { prisma } from "@/lib/prisma";
 
 function nextAppointmentTime() {
@@ -19,177 +12,178 @@ function nextAppointmentTime() {
   return date;
 }
 
-function severityIndicator(status: string) {
+function severity(status: string) {
   if (status === "Overdue") return "🔴";
   if (status === "Due" || status === "Due Soon") return "🟡";
   return "🟢";
 }
 
+function serviceRevenue(rows: MaintenanceQueueRow[]) {
+  return Array.from(
+    rows
+      .filter(isOpenMaintenanceOpportunity)
+      .reduce((map, row) => {
+        map.set(row.item.name, (map.get(row.item.name) ?? 0) + row.item.averagePrice);
+        return map;
+      }, new Map<string, number>())
+  )
+    .map(([service, revenue]) => ({ service, revenue }))
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 7);
+}
+
+function statusDistribution(rows: MaintenanceQueueRow[]) {
+  return {
+    healthy: rows.filter((row) => row.prediction.status === "Healthy").length,
+    dueSoon: rows.filter((row) => row.prediction.status === "Due" || row.prediction.status === "Due Soon").length,
+    overdue: rows.filter((row) => row.prediction.status === "Overdue").length
+  };
+}
+
+function communicationQueue(cards: ReturnType<typeof buildMaintenanceQueue>["cards"]) {
+  const noReminder = cards.filter((card) => !card.latestReminder).length;
+  const reminded = cards.filter((card) => Boolean(card.latestReminder)).length;
+  const overdueNoReminder = cards.filter((card) => card.overdueCount > 0 && !card.latestReminder).length;
+  return { noReminder, reminded, overdueNoReminder };
+}
+
+function AppointmentForm({
+  customerId,
+  vehicleId,
+  serviceName,
+  revenue,
+  label = "Book Appointment"
+}: {
+  customerId: string;
+  vehicleId: string;
+  serviceName: string;
+  revenue: number;
+  label?: string;
+}) {
+  return (
+    <form action={createAppointmentAction}>
+      <input type="hidden" name="customerId" value={customerId} />
+      <input type="hidden" name="vehicleId" value={vehicleId} />
+      <input type="hidden" name="scheduledAt" value={dateTimeInputValue(nextAppointmentTime())} />
+      <input type="hidden" name="durationMinutes" value={60} />
+      <input type="hidden" name="serviceName" value={serviceName} />
+      <input type="hidden" name="estimatedRevenue" value={revenue} />
+      <input type="hidden" name="notes" value={`Booked from maintenance revenue pipeline for ${serviceName}.`} />
+      <button className="button secondary" type="submit"><CalendarPlus /> {label}</button>
+    </form>
+  );
+}
+
+function ReminderForm({ maintenanceId, label = "Send Reminder" }: { maintenanceId?: string; label?: string }) {
+  if (!maintenanceId) {
+    return <Link className="button secondary" href="/app/reminders"><MessageSquareText /> {label}</Link>;
+  }
+  return (
+    <form action={sendMockReminderAction}>
+      <input type="hidden" name="maintenanceId" value={maintenanceId} />
+      <button className="button secondary" type="submit"><MessageSquareText /> {label}</button>
+    </form>
+  );
+}
+
+function BarRow({ label, value, max, tone = "" }: { label: string; value: number; max: number; tone?: string }) {
+  const width = max > 0 ? Math.max(value > 0 ? 6 : 0, Math.round((value / max) * 100)) : 0;
+  return (
+    <div className="bar-row">
+      <div className="mini-row"><span>{label}</span><strong>{number.format(value)}</strong></div>
+      <div className={`bar-track ${tone}`}><span style={{ width: `${width}%` }} /></div>
+    </div>
+  );
+}
+
 export default async function MaintenancePage({ searchParams }: { searchParams: { error?: string } }) {
   const user = await requireUser();
-  const [vehicles, maintenance] = await Promise.all([
-    prisma.vehicle.findMany({
-      where: { customer: { shopId: user.shopId } },
-      include: { customer: true },
-      orderBy: { updatedAt: "desc" }
-    }),
-    prisma.maintenanceItem.findMany({
-      where: { vehicle: { customer: { shopId: user.shopId } } },
-      include: {
-        vehicle: { include: { customer: true, mileageLogs: true } },
-        reminders: { orderBy: { sentAt: "desc" }, take: 1 }
-      },
-      orderBy: { name: "asc" }
-    })
-  ]);
+  const maintenance = await prisma.maintenanceItem.findMany({
+    where: { vehicle: { customer: { shopId: user.shopId } } },
+    include: {
+      vehicle: { include: { customer: true, mileageLogs: true } },
+      reminders: { orderBy: { sentAt: "desc" }, take: 1 }
+    },
+    orderBy: { name: "asc" }
+  });
+
   const queue = buildMaintenanceQueue(maintenance as MaintenanceQueueSource[]);
+  const revenueByService = serviceRevenue(queue.rows);
+  const distribution = statusDistribution(queue.rows);
+  const communication = communicationQueue(queue.cards);
+  const maxServiceRevenue = Math.max(1, ...revenueByService.map((item) => item.revenue));
+  const maxDistribution = Math.max(distribution.healthy, distribution.dueSoon, distribution.overdue, 1);
+  const maxCommunication = Math.max(communication.noReminder, communication.reminded, communication.overdueNoReminder, 1);
 
   return (
     <>
       <header className="topbar">
         <div>
-          <p className="eyebrow">Revenue opportunity queue</p>
+          <p className="eyebrow">Revenue opportunity pipeline</p>
           <h1>Maintenance</h1>
-          <p>Prioritize which customers to contact today based on overdue work, due-soon services, and revenue potential.</p>
+          <p>Who should I contact today, and how much money is available if they book service?</p>
         </div>
+        <Link className="button secondary" href="/app/reminders"><Send /> Send reminders</Link>
       </header>
       {searchParams.error ? <p className="badge danger" style={{ marginBottom: 16 }}>{searchParams.error}</p> : null}
 
       <section className="grid grid-5">
         <div className="card stat"><span className="muted">Overdue Revenue</span><strong>{money.format(queue.kpis.overdueRevenue)}</strong><span className="badge danger">Past due</span></div>
-        <div className="card stat"><span className="muted">Due Soon Revenue</span><strong>{money.format(queue.kpis.dueSoonRevenue)}</strong><span className="badge warn">Upcoming</span></div>
-        <div className="card stat"><span className="muted">Open Opportunities</span><strong>{money.format(queue.kpis.openOpportunities)}</strong><span className="badge">Queue value</span></div>
-        <div className="card stat"><span className="muted">Vehicles Due</span><strong>{queue.kpis.vehiclesDue}</strong><span className="badge">Needs review</span></div>
+        <div className="card stat"><span className="muted">Due Soon Revenue</span><strong>{money.format(queue.kpis.dueSoonRevenue)}</strong><span className="badge warn">Ready to schedule</span></div>
+        <div className="card stat"><span className="muted">Open Opportunity</span><strong>{money.format(queue.kpis.openOpportunities)}</strong><span className="badge">Available pipeline</span></div>
+        <div className="card stat"><span className="muted">Vehicles To Contact</span><strong>{queue.kpis.vehiclesDue}</strong><span className="badge warn">Unique vehicles</span></div>
         <div className="card stat"><span className="muted">Customers Ready</span><strong>{queue.kpis.customersReady}</strong><span className="badge ok">Contact today</span></div>
       </section>
 
-      <section className="split" style={{ marginTop: 16 }}>
-        <div className="panel">
-          <h2>Predicted Maintenance Queue</h2>
-          <div className="list">
-            {queue.cards.length ? queue.cards.map((card) => {
+      <section className="maintenance-pipeline-grid" style={{ marginTop: 16 }}>
+        <div className="panel maintenance-priority-panel">
+          <div className="row">
+            <h2>Contact Priority Queue</h2>
+            <span className="badge warn">{money.format(queue.kpis.openOpportunities)} available</span>
+          </div>
+          <div className="contact-card-grid">
+            {queue.cards.length ? queue.cards.map((card, index) => {
               const highest = card.highestPriority;
-              const cardSeverity = card.overdueCount
-                ? "🔴 overdue"
-                : card.dueCount + card.dueSoonCount
-                  ? "🟡 due soon"
-                  : "🟢 healthy";
+              const primaryService = highest?.item.name ?? "Maintenance service";
+              const primaryRevenue = highest?.item.averagePrice ?? card.potentialRevenue;
+              const priorityTone = card.overdueCount ? "danger" : "warn";
               return (
-                <details className="vehicle-queue-card" key={card.vehicle.id}>
+                <details className="contact-priority-card" key={card.vehicle.id} open={index === 0}>
                   <summary>
                     <div>
-                      <strong>{card.customer.name}</strong>
-                      <p>{card.vehicle.year} {card.vehicle.make} {card.vehicle.model} · {card.vehicle.currentMileage.toLocaleString()} mi</p>
-                      <p>
-                        {highest ? `${highest.prediction.status}: ${highest.item.name}` : "No active maintenance items"}
-                        {card.latestReminder ? ` · Reminder ${card.latestReminder.status} ${dateLabel(card.latestReminder.sentAt)}` : " · No reminder sent"}
-                      </p>
-                      <div className="queue-actions">
-                        <Link className="text-link" href={`/app/customers/${card.customer.id}`}>Open Customer Dashboard</Link>
-                        <Link className="text-link" href={`/app/customers/${card.customer.id}/vehicles/${card.vehicle.id}`}>Open Vehicle Dashboard</Link>
-                      </div>
+                      <span className={`badge ${priorityTone}`}>{card.overdueCount ? "🔴 Contact now" : "🟡 Contact soon"}</span>
+                      <h3>{card.customer.name}</h3>
+                      <p>{card.vehicle.year} {card.vehicle.make} {card.vehicle.model} · {number.format(card.vehicle.currentMileage)} mi</p>
+                      <p>{highest ? `${severity(highest.prediction.status)} ${highest.item.name}` : "No active service"} · {card.latestReminder ? `Reminder ${card.latestReminder.status} ${dateLabel(card.latestReminder.sentAt)}` : "No reminder sent"}</p>
                     </div>
-                    <div className="queue-summary">
-                      <span className={`badge ${card.overdueCount ? "danger" : card.dueCount + card.dueSoonCount ? "warn" : "ok"}`}>{cardSeverity}</span>
-                      <span className="badge warn">{money.format(card.potentialRevenue)} potential</span>
-                      <span className={`badge ${card.healthScore < 35 ? "danger" : card.healthScore < 60 ? "warn" : "ok"}`}>{card.healthScore}/100 health</span>
-                      <span className="badge danger">{card.overdueCount} overdue</span>
-                      <span className="badge warn">{card.dueCount + card.dueSoonCount} due soon</span>
+                    <div className="contact-card-revenue">
+                      <strong>{money.format(card.potentialRevenue)}</strong>
+                      <span>opportunity</span>
                     </div>
                   </summary>
-
-                  <div className="queue-preview">
-                    <span><strong>Highest Priority Service:</strong> {highest?.item.name ?? "None"}</span>
-                    <span><strong>Potential Revenue:</strong> {money.format(card.potentialRevenue)}</span>
-                    <span><strong>Reminder Status:</strong> {card.latestReminder ? `${card.latestReminder.status} ${dateLabel(card.latestReminder.sentAt)}` : "Not sent"}</span>
+                  <div className="contact-card-metrics">
+                    <span className="badge danger">{card.overdueCount} overdue</span>
+                    <span className="badge warn">{card.dueCount + card.dueSoonCount} due soon</span>
+                    <span className={`badge ${card.healthScore < 35 ? "danger" : card.healthScore < 60 ? "warn" : "ok"}`}>{card.healthScore}/100 health</span>
                   </div>
-
+                  <div className="queue-actions">
+                    <Link className="button secondary" href={`/app/customers/${card.customer.id}/vehicles/${card.vehicle.id}`}><Wrench /> Open Vehicle</Link>
+                    <ReminderForm maintenanceId={highest?.item.id} />
+                    <AppointmentForm customerId={card.customer.id} vehicleId={card.vehicle.id} serviceName={primaryService} revenue={primaryRevenue} />
+                  </div>
                   <div className="table-wrap">
                     <table>
-                      <thead><tr><th>Service</th><th>Status</th><th>Due Date</th><th>Due Mileage</th><th>Revenue</th><th>Remaining Life</th><th>Actions</th></tr></thead>
+                      <thead><tr><th>Service</th><th>Status</th><th>Revenue</th><th>Due</th><th>Life</th></tr></thead>
                       <tbody>
-                        {card.rows.map(({ item, prediction }) => (
+                        {card.opportunityRows.map(({ item, prediction }) => (
                           <tr key={item.id}>
-                            <td><strong>{item.name}</strong><br /><span className="muted">{item.status}</span></td>
-                            <td><span className={`badge ${prediction.statusTone}`}>{severityIndicator(prediction.status)} {prediction.status}</span></td>
-                            <td>{dateLabel(prediction.dueDate)}</td>
-                            <td>{prediction.dueMileage.toLocaleString()} mi</td>
+                            <td><strong>{item.name}</strong></td>
+                            <td><span className={`badge ${prediction.statusTone}`}>{severity(prediction.status)} {prediction.status}</span></td>
                             <td>{money.format(item.averagePrice)}</td>
+                            <td>{prediction.isOverdue ? "Overdue" : dateLabel(prediction.dueDate)}</td>
                             <td>
                               <div className="progress"><span style={{ width: `${prediction.remainingLifePercentage}%` }} /></div>
-                              <small>{prediction.remainingLifePercentage}% · current {prediction.currentMileage.toLocaleString()} mi</small>
-                            </td>
-                            <td>
-                              <div className="queue-actions">
-                                <form action={sendMockReminderAction}>
-                                  <input type="hidden" name="maintenanceId" value={item.id} />
-                                  <button className="button secondary" type="submit"><MessageSquareText /> Send Reminder</button>
-                                </form>
-                                <form action={createAppointmentAction}>
-                                  <input type="hidden" name="customerId" value={card.customer.id} />
-                                  <input type="hidden" name="vehicleId" value={card.vehicle.id} />
-                                  <input type="hidden" name="scheduledAt" value={dateTimeInputValue(nextAppointmentTime())} />
-                                  <input type="hidden" name="durationMinutes" value={60} />
-                                  <input type="hidden" name="serviceName" value={item.name} />
-                                  <input type="hidden" name="estimatedRevenue" value={item.averagePrice} />
-                                  <input type="hidden" name="notes" value={`Booked from maintenance queue for ${item.name}.`} />
-                                  <button className="button secondary" type="submit"><CalendarPlus /> Book Appointment</button>
-                                </form>
-                              </div>
-                              <details className="inline-details">
-                                <summary className="button ghost"><Pencil /> Edit Maintenance Item</summary>
-                                <form className="form compact-form" action={updateMaintenanceItemAction}>
-                                  <input type="hidden" name="maintenanceId" value={item.id} />
-                                  <input type="hidden" name="returnTo" value="/app/maintenance" />
-                                  <label>Service type<input name="name" defaultValue={item.name} required /></label>
-                                  <div className="form-row">
-                                    <label>Mileage interval<input name="mileageInterval" type="number" min={1} defaultValue={item.mileageInterval} required /></label>
-                                    <label>Time interval months<input name="timeIntervalMonths" type="number" min={1} defaultValue={item.timeIntervalMonths} required /></label>
-                                  </div>
-                                  <div className="form-row">
-                                    <label>Estimated price<input name="averagePrice" type="number" min={0} step="0.01" defaultValue={item.averagePrice} /></label>
-                                    <label>Status
-                                      <select name="status" defaultValue={item.status}>
-                                        <option>ACTIVE</option>
-                                        <option>WATCH</option>
-                                        <option>DUE</option>
-                                        <option>DEFERRED</option>
-                                        <option>PAUSED</option>
-                                      </select>
-                                    </label>
-                                  </div>
-                                  <div className="form-row">
-                                    <label>Override due mileage<input name="overrideDueMileage" type="number" min={0} defaultValue={item.overrideDueMileage ?? ""} placeholder={prediction.dueMileage.toString()} /></label>
-                                    <label>Override due date<input name="overrideDueDate" type="date" defaultValue={item.overrideDueDate ? yyyyMmDd(item.overrideDueDate) : ""} /></label>
-                                  </div>
-                                  <div className="form-row">
-                                    <label>Reminder threshold %<input name="reminderThresholdPercentage" type="number" min={0} max={100} defaultValue={item.reminderThresholdPercentage} /></label>
-                                    <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="remindersEnabled" defaultChecked={item.remindersEnabled} /> Reminders enabled</label>
-                                  </div>
-                                  <label>Notes<textarea name="customNotes" defaultValue={item.customNotes ?? ""} /></label>
-                                  <button className="button secondary" type="submit">Save item</button>
-                                </form>
-                                <form className="form danger-zone" action={deleteMaintenanceItemAction}>
-                                  <input type="hidden" name="maintenanceId" value={item.id} />
-                                  <input type="hidden" name="returnTo" value="/app/maintenance" />
-                                  <button className="button danger-button" type="submit">Delete item</button>
-                                </form>
-                              </details>
-                              <details className="inline-details">
-                                <summary className="button ghost"><CheckCircle2 /> Mark Complete</summary>
-                                <form className="form compact-form" action={completeServiceAction}>
-                                  <input type="hidden" name="maintenanceId" value={item.id} />
-                                  <input type="hidden" name="returnTo" value="/app/maintenance" />
-                                  <label>Date<input name="serviceDate" type="date" defaultValue={yyyyMmDd(new Date())} /></label>
-                                  <input name="summary" defaultValue={`${item.name} completed`} aria-label="Service performed" />
-                                  <input name="mileage" type="number" min={0} defaultValue={prediction.currentMileage} aria-label="Mileage" required />
-                                  <input name="revenue" type="number" min={0} step="0.01" defaultValue={item.averagePrice} aria-label="Revenue" />
-                                  <input name="notes" placeholder="Service notes" aria-label="Service notes" />
-                                  <input name="deferredDescription" placeholder="Deferred work, optional" aria-label="Deferred work" />
-                                  <input name="deferredRevenue" type="number" placeholder="$" aria-label="Deferred revenue" />
-                                  <button className="button secondary" type="submit"><CheckCircle2 /> Complete Service</button>
-                                </form>
-                              </details>
+                              <small>{prediction.remainingLifePercentage}% remaining</small>
                             </td>
                           </tr>
                         ))}
@@ -203,48 +197,43 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
         </div>
 
         <aside className="grid">
-          <details className="panel inline-details">
-            <summary className="button ghost"><Plus /> Add Maintenance Item</summary>
-            <form className="form" action={createMaintenanceItemAction}>
-              <label>Vehicle
-                <select name="vehicleId" required>
-                  {vehicles.map((vehicle) => (
-                    <option key={vehicle.id} value={vehicle.id}>{vehicle.customer.name} · {vehicle.year} {vehicle.make} {vehicle.model}</option>
-                  ))}
-                </select>
-              </label>
-              <label>Service name<input name="name" required placeholder="Oil change" /></label>
-              <div className="form-row">
-                <label>Last completed date<input name="lastCompletedDate" type="date" defaultValue={yyyyMmDd(new Date())} /></label>
-                <label>Last completed mileage<input name="lastCompletedMileage" type="number" min={0} defaultValue={vehicles[0]?.currentMileage ?? 0} /></label>
-              </div>
-              <div className="form-row">
-                <label>Mileage interval<input name="mileageInterval" type="number" min={1} defaultValue={5000} /></label>
-                <label>Time interval months<input name="timeIntervalMonths" type="number" min={1} defaultValue={6} /></label>
-              </div>
-              <div className="form-row">
-                <label>Estimated price<input name="averagePrice" type="number" min={0} step="0.01" defaultValue={120} /></label>
-                <label>Reminder threshold %<input name="reminderThresholdPercentage" type="number" min={0} max={100} defaultValue={20} /></label>
-              </div>
-              <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="remindersEnabled" defaultChecked /> Reminders enabled</label>
-              <button className="button secondary" type="submit"><Wrench /> Add service</button>
-            </form>
-          </details>
-
           <div className="panel">
-            <h2>Contact Priority</h2>
-            <div className="list">
-              {queue.cards.slice(0, 5).map((card, index) => (
-                <div className="card" key={card.vehicle.id}>
-                  <div className="row">
-                    <strong>{index + 1}. {card.customer.name}</strong>
-                    <span className="badge warn">{money.format(card.potentialRevenue)}</span>
-                  </div>
-                  <p>{card.vehicle.year} {card.vehicle.make} {card.vehicle.model} · {card.overdueCount} overdue · {card.dueSoonCount + card.dueCount} due soon</p>
-                </div>
-              ))}
-              {!queue.cards.length ? <p>No priority contacts yet.</p> : null}
+            <h2>Communication Queue</h2>
+            <div className="list" style={{ marginTop: 12 }}>
+              <BarRow label="No reminder sent" value={communication.noReminder} max={maxCommunication} tone="danger" />
+              <BarRow label="Reminder sent" value={communication.reminded} max={maxCommunication} tone="warn" />
+              <BarRow label="Overdue, no reminder" value={communication.overdueNoReminder} max={maxCommunication} tone="danger" />
             </div>
+          </div>
+          <div className="panel">
+            <h2>Maintenance Health Distribution</h2>
+            <div className="list" style={{ marginTop: 12 }}>
+              <BarRow label="Healthy" value={distribution.healthy} max={maxDistribution} tone="ok" />
+              <BarRow label="Due Soon" value={distribution.dueSoon} max={maxDistribution} tone="warn" />
+              <BarRow label="Overdue" value={distribution.overdue} max={maxDistribution} tone="danger" />
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <section className="dashboard-grid" style={{ marginTop: 16 }}>
+        <div className="panel dashboard-wide">
+          <h2>Revenue Opportunities by Service</h2>
+          <div className="list" style={{ marginTop: 12 }}>
+            {revenueByService.length ? revenueByService.map((item) => (
+              <div className="bar-row" key={item.service}>
+                <div className="mini-row"><span>{item.service}</span><strong>{money.format(item.revenue)}</strong></div>
+                <div className="bar-track"><span style={{ width: `${Math.max(8, Math.round((item.revenue / maxServiceRevenue) * 100))}%` }} /></div>
+              </div>
+            )) : <p>No revenue opportunities yet. Add maintenance intervals from a Vehicle Dashboard to begin forecasting service revenue.</p>}
+          </div>
+        </div>
+
+        <aside className="panel">
+          <h2>Pipeline Notes</h2>
+          <div className="list" style={{ marginTop: 12 }}>
+            <div className="card"><strong>Maintenance is follow-up here</strong><p>Create and edit service intervals from each Vehicle Dashboard.</p></div>
+            <div className="card"><strong>Prioritize by revenue</strong><p>Cards are sorted by overdue services, opportunity value, due-soon count, and remaining life.</p></div>
           </div>
         </aside>
       </section>

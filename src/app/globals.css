@@ -629,6 +629,88 @@ textarea {
   align-items: start;
 }
 
+.maintenance-pipeline-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.75fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.maintenance-priority-panel {
+  min-width: 0;
+}
+
+.contact-card-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.contact-priority-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.contact-priority-card summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+  align-items: flex-start;
+}
+
+.contact-priority-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.contact-priority-card h3 {
+  font-size: 1.2rem;
+  margin-top: 8px;
+}
+
+.contact-priority-card p {
+  margin: 6px 0 0;
+}
+
+.contact-card-revenue {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  min-width: 120px;
+}
+
+.contact-card-revenue strong {
+  font-size: 1.7rem;
+  color: var(--ink);
+}
+
+.contact-card-revenue span {
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.contact-card-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 18px 14px;
+}
+
+.contact-priority-card .queue-actions {
+  padding: 0 18px 16px;
+}
+
+.contact-priority-card .table-wrap {
+  border-top: 1px solid var(--line);
+}
+
 .dashboard-wide {
   min-width: 0;
 }
@@ -872,6 +954,7 @@ textarea {
   .grid-3,
   .grid-2,
   .dashboard-grid,
+  .maintenance-pipeline-grid,
   .split {
     grid-template-columns: 1fr;
   }

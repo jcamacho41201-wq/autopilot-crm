@@ -4,12 +4,15 @@ import { ArrowLeft, CalendarPlus, CheckCircle2, Gauge, MessageSquareText, Plus, 
 import {
   addMileageAction,
   createAppointmentAction,
+  createMaintenanceItemAction,
   createServiceRecordAction,
   deleteMileageLogAction,
+  deleteMaintenanceItemAction,
   deleteVehicleAction,
   flagMileageCorrectionAction,
   sendMockReminderAction,
   updateMileageLogAction,
+  updateMaintenanceItemAction,
   updateVehicleAction
 } from "@/lib/actions";
 import { requireUser } from "@/lib/auth";
@@ -253,10 +256,45 @@ export default async function VehicleDashboardPage({
           </div>
 
           <div className="panel" id="maintenance-schedule">
-            <h2>Maintenance Schedule</h2>
+            <div className="row">
+              <h2>Maintenance Schedule</h2>
+              <details className="inline-details modal-details">
+                <summary className="button"><Plus /> Add Maintenance Item</summary>
+                <div className="modal-panel">
+                  <form className="form" action={createMaintenanceItemAction}>
+                    <input type="hidden" name="vehicleId" value={vehicle.id} />
+                    <input type="hidden" name="returnTo" value={vehiclePath} />
+                    <label>Service name<input name="name" required placeholder="Oil change" /></label>
+                    <div className="form-row">
+                      <label>Last completed date<input name="lastCompletedDate" type="date" defaultValue={yyyyMmDd(new Date())} /></label>
+                      <label>Last completed mileage<input name="lastCompletedMileage" type="number" min={0} defaultValue={vehicle.currentMileage} /></label>
+                    </div>
+                    <div className="form-row">
+                      <label>Mileage interval<input name="mileageInterval" type="number" min={1} defaultValue={5000} /></label>
+                      <label>Time interval months<input name="timeIntervalMonths" type="number" min={1} defaultValue={6} /></label>
+                    </div>
+                    <div className="form-row">
+                      <label>Estimated price<input name="averagePrice" type="number" min={0} step="0.01" defaultValue={120} /></label>
+                      <label>Reminder threshold %<input name="reminderThresholdPercentage" type="number" min={0} max={100} defaultValue={20} /></label>
+                    </div>
+                    <label>Status
+                      <select name="status" defaultValue="ACTIVE">
+                        <option>ACTIVE</option>
+                        <option>WATCH</option>
+                        <option>DUE</option>
+                        <option>DEFERRED</option>
+                        <option>PAUSED</option>
+                      </select>
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="remindersEnabled" defaultChecked /> Reminders enabled</label>
+                    <button className="button" type="submit"><Wrench /> Add service</button>
+                  </form>
+                </div>
+              </details>
+            </div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Service</th><th>Status</th><th>Due Date</th><th>Due Mileage</th><th>Revenue</th><th>Remaining Life</th></tr></thead>
+                <thead><tr><th>Service</th><th>Status</th><th>Due Date</th><th>Due Mileage</th><th>Revenue</th><th>Remaining Life</th><th>Manage</th></tr></thead>
                 <tbody>
                   {rows.length ? rows.map(({ item, prediction }) => (
                     <tr key={item.id}>
@@ -269,8 +307,50 @@ export default async function VehicleDashboardPage({
                         <div className="progress"><span style={{ width: `${prediction.remainingLifePercentage}%` }} /></div>
                         <small>{prediction.remainingLifePercentage}% remaining</small>
                       </td>
+                      <td>
+                        <details className="inline-details">
+                          <summary className="button ghost">Edit</summary>
+                          <form className="form compact-form" action={updateMaintenanceItemAction}>
+                            <input type="hidden" name="maintenanceId" value={item.id} />
+                            <input type="hidden" name="returnTo" value={vehiclePath} />
+                            <label>Service type<input name="name" defaultValue={item.name} required /></label>
+                            <div className="form-row">
+                              <label>Mileage interval<input name="mileageInterval" type="number" min={1} defaultValue={item.mileageInterval} required /></label>
+                              <label>Time interval months<input name="timeIntervalMonths" type="number" min={1} defaultValue={item.timeIntervalMonths} required /></label>
+                            </div>
+                            <div className="form-row">
+                              <label>Estimated price<input name="averagePrice" type="number" min={0} step="0.01" defaultValue={item.averagePrice} /></label>
+                              <label>Status
+                                <select name="status" defaultValue={item.status}>
+                                  <option>ACTIVE</option>
+                                  <option>WATCH</option>
+                                  <option>DUE</option>
+                                  <option>DEFERRED</option>
+                                  <option>PAUSED</option>
+                                </select>
+                              </label>
+                            </div>
+                            <div className="form-row">
+                              <label>Override due mileage<input name="overrideDueMileage" type="number" min={0} defaultValue={item.overrideDueMileage ?? ""} placeholder={prediction.dueMileage.toString()} /></label>
+                              <label>Override due date<input name="overrideDueDate" type="date" defaultValue={item.overrideDueDate ? yyyyMmDd(item.overrideDueDate) : ""} /></label>
+                            </div>
+                            <div className="form-row">
+                              <label>Reminder threshold %<input name="reminderThresholdPercentage" type="number" min={0} max={100} defaultValue={item.reminderThresholdPercentage} /></label>
+                              <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="remindersEnabled" defaultChecked={item.remindersEnabled} /> Reminders enabled</label>
+                            </div>
+                            <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="confirmLowerMileage" /> Confirm lower due mileage</label>
+                            <label>Notes<textarea name="customNotes" defaultValue={item.customNotes ?? ""} /></label>
+                            <button className="button secondary" type="submit"><Save /> Save item</button>
+                          </form>
+                        </details>
+                        <form className="form danger-zone" action={deleteMaintenanceItemAction}>
+                          <input type="hidden" name="maintenanceId" value={item.id} />
+                          <input type="hidden" name="returnTo" value={vehiclePath} />
+                          <button className="button danger-button" type="submit"><Trash2 /> Delete</button>
+                        </form>
+                      </td>
                     </tr>
-                  )) : <tr><td colSpan={6}>No maintenance items yet.</td></tr>}
+                  )) : <tr><td colSpan={7}>No maintenance items yet.</td></tr>}
                 </tbody>
               </table>
             </div>

@@ -579,11 +579,12 @@ export async function updateMaintenanceItemAction(formData: FormData) {
     include: { vehicle: true }
   });
   if (!item) return;
+  const fallback = returnTo(formData, "/app/maintenance");
   const mileageInterval = requiredMileage(formData, "mileageInterval");
-  if (mileageInterval === null || mileageInterval <= 0) failWithMessage(formData, "/app/maintenance", "Mileage interval must be greater than zero.");
+  if (mileageInterval === null || mileageInterval <= 0) failWithMessage(formData, fallback, "Mileage interval must be greater than zero.");
   const dueMileage = optionalNumberValue(formData, "overrideDueMileage");
   if (dueMileage !== null && dueMileage < item.vehicle.currentMileage && formData.get("confirmLowerMileage") !== "on") {
-    failWithMessage(formData, "/app/maintenance", `Due mileage ${dueMileage.toLocaleString()} is below the vehicle's current mileage ${item.vehicle.currentMileage.toLocaleString()}. Confirm lower mileage if this is intentional.`);
+    failWithMessage(formData, fallback, `Due mileage ${dueMileage.toLocaleString()} is below the vehicle's current mileage ${item.vehicle.currentMileage.toLocaleString()}. Confirm lower mileage if this is intentional.`);
   }
   await prisma.maintenanceItem.update({
     where: { id: item.id },
@@ -602,6 +603,8 @@ export async function updateMaintenanceItemAction(formData: FormData) {
   });
   revalidatePath("/app/maintenance");
   revalidatePath("/app/customers");
+  revalidatePath(vehicleDashboardPath(item.vehicle.customerId, item.vehicleId));
+  revalidatePath(fallback);
 }
 
 export async function createMaintenanceItemAction(formData: FormData) {
@@ -611,8 +614,9 @@ export async function createMaintenanceItemAction(formData: FormData) {
     where: { id: vehicleId, customer: { shopId: user.shopId } }
   });
   if (!vehicle) return;
+  const fallback = returnTo(formData, "/app/maintenance");
   const mileageInterval = requiredMileage(formData, "mileageInterval");
-  if (mileageInterval === null || mileageInterval <= 0) failWithMessage(formData, "/app/maintenance", "Mileage interval must be greater than zero.");
+  if (mileageInterval === null || mileageInterval <= 0) failWithMessage(formData, fallback, "Mileage interval must be greater than zero.");
   await prisma.maintenanceItem.create({
     data: {
       vehicleId,
@@ -629,18 +633,24 @@ export async function createMaintenanceItemAction(formData: FormData) {
   });
   revalidatePath("/app/maintenance");
   revalidatePath("/app/customers");
+  revalidatePath(vehicleDashboardPath(vehicle.customerId, vehicle.id));
+  revalidatePath(fallback);
 }
 
 export async function deleteMaintenanceItemAction(formData: FormData) {
   const user = await requireUser();
   const maintenanceId = stringValue(formData, "maintenanceId");
   const item = await prisma.maintenanceItem.findFirst({
-    where: { id: maintenanceId, vehicle: { customer: { shopId: user.shopId } } }
+    where: { id: maintenanceId, vehicle: { customer: { shopId: user.shopId } } },
+    include: { vehicle: true }
   });
   if (!item) return;
+  const fallback = returnTo(formData, "/app/maintenance");
   await prisma.maintenanceItem.delete({ where: { id: item.id } });
   revalidatePath("/app/maintenance");
   revalidatePath("/app/customers");
+  revalidatePath(vehicleDashboardPath(item.vehicle.customerId, item.vehicleId));
+  revalidatePath(fallback);
 }
 
 export async function createServiceRecordAction(formData: FormData) {

@@ -50,15 +50,46 @@ function requiredMileage(formData: FormData, key = "mileage") {
 }
 
 async function validateMileageForVehicle(vehicleId: string, mileage: number, confirmLower: boolean) {
-  const latest = await prisma.mileageLog.findFirst({
-    where: { vehicleId },
-    orderBy: { loggedAt: "desc" }
-  });
-  const latestMileage = latest?.mileage ?? 0;
-  if (mileage < latestMileage && !confirmLower) {
-    return `Mileage ${mileage.toLocaleString()} is lower than the latest recorded mileage ${latestMileage.toLocaleString()}. Check "Confirm lower mileage" if this is intentional.`;
+  const vehicle = await prisma.vehicle.findUnique({ where: { id: vehicleId } });
+  const currentMileage = vehicle?.currentMileage ?? 0;
+  if (mileage < currentMileage && !confirmLower) {
+    return `Mileage ${mileage.toLocaleString()} is lower than the current mileage ${currentMileage.toLocaleString()}. Check "Confirm lower mileage" if this is a correction.`;
   }
   return null;
+}
+
+async function syncVehicleMileageProfile(vehicleId: string) {
+  const logs = await prisma.mileageLog.findMany({
+    where: { vehicleId },
+    orderBy: { loggedAt: "asc" }
+  });
+  if (!logs.length) return;
+
+  const usableLogs = logs.filter((log) => !log.source.toLowerCase().includes("correction"));
+  const profileLogs = usableLogs.length >= 2 ? usableLogs : logs;
+  const first = profileLogs[0];
+  const last = profileLogs[profileLogs.length - 1];
+  let estimatedMilesYear: number | undefined;
+  if (first && last && profileLogs.length >= 2) {
+    const days = Math.max(1, (last.loggedAt.getTime() - first.loggedAt.getTime()) / 86400000);
+    const annual = Math.round(((last.mileage - first.mileage) / days) * 365);
+    if (annual > 0) estimatedMilesYear = annual;
+  }
+
+  const highest = logs.reduce((max, log) => Math.max(max, log.mileage), 0);
+  const latest = [...logs].sort((a, b) => b.loggedAt.getTime() - a.loggedAt.getTime())[0];
+  await prisma.vehicle.update({
+    where: { id: vehicleId },
+    data: {
+      currentMileage: highest,
+      mileageUpdatedAt: latest.loggedAt,
+      ...(estimatedMilesYear ? { estimatedMilesYear } : {})
+    }
+  });
+}
+
+function vehicleDashboardPath(customerId: string, vehicleId: string) {
+  return `/app/customers/${customerId}/vehicles/${vehicleId}`;
 }
 
 async function recordMileage(params: {
@@ -69,6 +100,9 @@ async function recordMileage(params: {
   previousCurrentMileage: number;
   allowLowerCurrent?: boolean;
 }) {
+  const source = params.allowLowerCurrent && params.mileage < params.previousCurrentMileage
+    ? `Correction: ${params.source}`
+    : params.source;
   const dayStart = new Date(params.loggedAt);
   dayStart.setHours(0, 0, 0, 0);
   const dayEnd = new Date(dayStart);
@@ -77,7 +111,7 @@ async function recordMileage(params: {
     where: {
       vehicleId: params.vehicleId,
       mileage: params.mileage,
-      source: params.source,
+      source,
       loggedAt: { gte: dayStart, lt: dayEnd }
     }
   });
@@ -87,30 +121,11 @@ async function recordMileage(params: {
         vehicleId: params.vehicleId,
         mileage: params.mileage,
         loggedAt: params.loggedAt,
-        source: params.source
+        source
       }
     });
   }
-  const logs = await prisma.mileageLog.findMany({
-    where: { vehicleId: params.vehicleId },
-    orderBy: { loggedAt: "asc" }
-  });
-  const first = logs[0];
-  const last = logs[logs.length - 1];
-  let estimatedMilesYear: number | undefined;
-  if (first && last && logs.length >= 2) {
-    const days = Math.max(1, (last.loggedAt.getTime() - first.loggedAt.getTime()) / 86400000);
-    const annual = Math.round(((last.mileage - first.mileage) / days) * 365);
-    if (annual > 0) estimatedMilesYear = annual;
-  }
-  await prisma.vehicle.update({
-    where: { id: params.vehicleId },
-    data: {
-      currentMileage: params.allowLowerCurrent ? params.mileage : Math.max(params.previousCurrentMileage, params.mileage),
-      mileageUpdatedAt: params.loggedAt,
-      ...(estimatedMilesYear ? { estimatedMilesYear } : {})
-    }
-  });
+  await syncVehicleMileageProfile(params.vehicleId);
 }
 
 export async function loginAction(formData: FormData) {
@@ -332,10 +347,14 @@ export async function updateVehicleAction(formData: FormData) {
     include: { customer: true }
   });
   if (!vehicle) return;
-  const mileage = requiredMileage(formData, "currentMileage");
-  if (mileage === null) failWithMessage(formData, `/app/customers/${vehicle.customerId}`, "Vehicle mileage is required and cannot be negative.");
-  const mileageError = await validateMileageForVehicle(vehicle.id, mileage, formData.get("confirmLowerMileage") === "on");
-  if (mileageError) failWithMessage(formData, `/app/customers/${vehicle.customerId}`, mileageError);
+  const fallback = returnTo(formData, `/app/customers/${vehicle.customerId}`);
+  const rawMileage = stringValue(formData, "currentMileage");
+  const mileage = rawMileage ? requiredMileage(formData, "currentMileage") : null;
+  if (rawMileage && mileage === null) failWithMessage(formData, fallback, "Vehicle mileage is required and cannot be negative.");
+  const mileageError = mileage !== null
+    ? await validateMileageForVehicle(vehicle.id, mileage, formData.get("confirmLowerMileage") === "on")
+    : null;
+  if (mileageError) failWithMessage(formData, fallback, mileageError);
   await prisma.vehicle.update({
     where: { id: vehicle.id },
     data: {
@@ -350,16 +369,19 @@ export async function updateVehicleAction(formData: FormData) {
       estimatedMilesYear: numberValue(formData, "estimatedMilesYear", vehicle.estimatedMilesYear)
     }
   });
-  await recordMileage({
-    vehicleId: vehicle.id,
-    mileage,
-    loggedAt: new Date(),
-    source: "vehicle edit",
-    previousCurrentMileage: vehicle.currentMileage,
-    allowLowerCurrent: formData.get("confirmLowerMileage") === "on"
-  });
+  if (mileage !== null) {
+    await recordMileage({
+      vehicleId: vehicle.id,
+      mileage,
+      loggedAt: new Date(),
+      source: "vehicle edit",
+      previousCurrentMileage: vehicle.currentMileage,
+      allowLowerCurrent: formData.get("confirmLowerMileage") === "on"
+    });
+  }
   revalidatePath("/app/customers");
   revalidatePath(`/app/customers/${vehicle.customerId}`);
+  revalidatePath(vehicleDashboardPath(vehicle.customerId, vehicle.id));
   revalidatePath("/app/maintenance");
 }
 
@@ -394,9 +416,10 @@ export async function addMileageAction(formData: FormData) {
   });
   if (!vehicle) return;
   const mileage = requiredMileage(formData);
-  if (mileage === null) failWithMessage(formData, "/app/maintenance", "Mileage is required and cannot be negative.");
+  const fallback = vehicleDashboardPath(vehicle.customerId, vehicle.id);
+  if (mileage === null) failWithMessage(formData, fallback, "Mileage is required and cannot be negative.");
   const mileageError = await validateMileageForVehicle(vehicleId, mileage, formData.get("confirmLowerMileage") === "on");
-  if (mileageError) failWithMessage(formData, "/app/maintenance", mileageError);
+  if (mileageError) failWithMessage(formData, fallback, mileageError);
   await recordMileage({
     vehicleId,
     mileage,
@@ -405,8 +428,79 @@ export async function addMileageAction(formData: FormData) {
     previousCurrentMileage: vehicle.currentMileage,
     allowLowerCurrent: formData.get("confirmLowerMileage") === "on"
   });
+  revalidatePath(fallback);
+  revalidatePath(`/app/customers/${vehicle.customerId}`);
   revalidatePath("/app/maintenance");
+  revalidatePath("/app/forecast");
   revalidatePath("/app/customers");
+}
+
+export async function updateMileageLogAction(formData: FormData) {
+  const user = await requireUser();
+  const id = stringValue(formData, "mileageLogId");
+  const log = await prisma.mileageLog.findFirst({
+    where: { id, vehicle: { customer: { shopId: user.shopId } } },
+    include: { vehicle: true }
+  });
+  if (!log) return;
+  const fallback = vehicleDashboardPath(log.vehicle.customerId, log.vehicleId);
+  const mileage = requiredMileage(formData);
+  if (mileage === null) failWithMessage(formData, fallback, "Mileage is required and cannot be negative.");
+  const mileageError = await validateMileageForVehicle(log.vehicleId, mileage, formData.get("confirmLowerMileage") === "on");
+  if (mileageError) failWithMessage(formData, fallback, mileageError);
+  const source = stringValue(formData, "source", log.source);
+  await prisma.mileageLog.update({
+    where: { id },
+    data: {
+      mileage,
+      loggedAt: dateValue(formData, "loggedAt", log.loggedAt),
+      source: formData.get("confirmLowerMileage") === "on" && mileage < log.vehicle.currentMileage && !source.toLowerCase().includes("correction")
+        ? `Correction: ${source}`
+        : source
+    }
+  });
+  await syncVehicleMileageProfile(log.vehicleId);
+  revalidatePath(fallback);
+  revalidatePath(`/app/customers/${log.vehicle.customerId}`);
+  revalidatePath("/app/maintenance");
+  revalidatePath("/app/forecast");
+}
+
+export async function deleteMileageLogAction(formData: FormData) {
+  const user = await requireUser();
+  const id = stringValue(formData, "mileageLogId");
+  const log = await prisma.mileageLog.findFirst({
+    where: { id, vehicle: { customer: { shopId: user.shopId } } },
+    include: { vehicle: true }
+  });
+  if (!log) return;
+  const fallback = vehicleDashboardPath(log.vehicle.customerId, log.vehicleId);
+  await prisma.mileageLog.delete({ where: { id } });
+  await syncVehicleMileageProfile(log.vehicleId);
+  revalidatePath(fallback);
+  revalidatePath(`/app/customers/${log.vehicle.customerId}`);
+  revalidatePath("/app/maintenance");
+  revalidatePath("/app/forecast");
+}
+
+export async function flagMileageCorrectionAction(formData: FormData) {
+  const user = await requireUser();
+  const id = stringValue(formData, "mileageLogId");
+  const log = await prisma.mileageLog.findFirst({
+    where: { id, vehicle: { customer: { shopId: user.shopId } } },
+    include: { vehicle: true }
+  });
+  if (!log) return;
+  const fallback = vehicleDashboardPath(log.vehicle.customerId, log.vehicleId);
+  await prisma.mileageLog.update({
+    where: { id },
+    data: { source: log.source.toLowerCase().includes("correction") ? log.source : `Correction: ${log.source}` }
+  });
+  await syncVehicleMileageProfile(log.vehicleId);
+  revalidatePath(fallback);
+  revalidatePath(`/app/customers/${log.vehicle.customerId}`);
+  revalidatePath("/app/maintenance");
+  revalidatePath("/app/forecast");
 }
 
 export async function completeServiceAction(formData: FormData) {
@@ -474,6 +568,7 @@ export async function completeServiceAction(formData: FormData) {
   revalidatePath("/app/maintenance");
   revalidatePath("/app/customers");
   revalidatePath("/app/forecast");
+  revalidatePath(vehicleDashboardPath(item.vehicle.customerId, item.vehicleId));
 }
 
 export async function updateMaintenanceItemAction(formData: FormData) {
@@ -556,10 +651,11 @@ export async function createServiceRecordAction(formData: FormData) {
     include: { customer: true }
   });
   if (!vehicle) return;
+  const fallback = returnTo(formData, `/app/customers/${vehicle.customerId}`);
   const mileage = requiredMileage(formData);
-  if (mileage === null) failWithMessage(formData, `/app/customers/${vehicle.customerId}`, "Service mileage is required and cannot be negative.");
+  if (mileage === null) failWithMessage(formData, fallback, "Service mileage is required and cannot be negative.");
   const mileageError = await validateMileageForVehicle(vehicleId, mileage, formData.get("confirmLowerMileage") === "on");
-  if (mileageError) failWithMessage(formData, `/app/customers/${vehicle.customerId}`, mileageError);
+  if (mileageError) failWithMessage(formData, fallback, mileageError);
   const serviceDate = dateValue(formData, "serviceDate");
   const revenue = numberValue(formData, "revenue", 0);
   const record = await prisma.serviceRecord.create({
@@ -611,8 +707,10 @@ export async function createServiceRecordAction(formData: FormData) {
     allowLowerCurrent: formData.get("confirmLowerMileage") === "on"
   });
   revalidatePath(`/app/customers/${vehicle.customerId}`);
+  revalidatePath(vehicleDashboardPath(vehicle.customerId, vehicleId));
   revalidatePath("/app/customers");
   revalidatePath("/app/maintenance");
+  revalidatePath("/app/forecast");
 }
 
 export async function updateServiceRecordAction(formData: FormData) {
@@ -656,6 +754,7 @@ export async function updateServiceRecordAction(formData: FormData) {
     allowLowerCurrent: formData.get("confirmLowerMileage") === "on"
   });
   revalidatePath(`/app/customers/${record.vehicle.customerId}`);
+  revalidatePath(vehicleDashboardPath(record.vehicle.customerId, record.vehicleId));
   revalidatePath("/app/maintenance");
   revalidatePath("/app/forecast");
 }

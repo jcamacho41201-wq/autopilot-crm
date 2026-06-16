@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { CalendarPlus, CheckCircle2, Gauge, MessageSquareText, Pencil, Plus, Wrench } from "lucide-react";
+import { CalendarPlus, CheckCircle2, MessageSquareText, Pencil, Plus, Wrench } from "lucide-react";
 import {
-  addMileageAction,
   completeServiceAction,
   createAppointmentAction,
   createMaintenanceItemAction,
@@ -25,7 +24,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
   const [vehicles, maintenance] = await Promise.all([
     prisma.vehicle.findMany({
       where: { customer: { shopId: user.shopId } },
-      include: { customer: true, mileageLogs: { orderBy: { loggedAt: "desc" } } },
+      include: { customer: true },
       orderBy: { updatedAt: "desc" }
     }),
     prisma.maintenanceItem.findMany({
@@ -76,7 +75,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                       </p>
                       <div className="queue-actions">
                         <Link className="text-link" href={`/app/customers/${card.customer.id}`}>Open Customer Dashboard</Link>
-                        <Link className="text-link" href={`/app/customers/${card.customer.id}#vehicle-${card.vehicle.id}`}>Open Vehicle Dashboard</Link>
+                        <Link className="text-link" href={`/app/customers/${card.customer.id}/vehicles/${card.vehicle.id}`}>Open Vehicle Dashboard</Link>
                       </div>
                     </div>
                     <div className="queue-summary">
@@ -156,7 +155,6 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                                     <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="remindersEnabled" defaultChecked={item.remindersEnabled} /> Reminders enabled</label>
                                   </div>
                                   <label>Notes<textarea name="customNotes" defaultValue={item.customNotes ?? ""} /></label>
-                                  <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="confirmLowerMileage" /> Confirm lower mileage</label>
                                   <button className="button secondary" type="submit">Save item</button>
                                 </form>
                                 <form className="form danger-zone" action={deleteMaintenanceItemAction}>
@@ -177,7 +175,6 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                                   <input name="notes" placeholder="Service notes" aria-label="Service notes" />
                                   <input name="deferredDescription" placeholder="Deferred work, optional" aria-label="Deferred work" />
                                   <input name="deferredRevenue" type="number" placeholder="$" aria-label="Deferred revenue" />
-                                  <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="confirmLowerMileage" /> Confirm lower mileage</label>
                                   <button className="button secondary" type="submit"><CheckCircle2 /> Complete Service</button>
                                 </form>
                               </details>
@@ -194,22 +191,6 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
         </div>
 
         <aside className="grid">
-          <form className="panel form" action={addMileageAction}>
-            <h2>Add Mileage Reading</h2>
-            <label>Vehicle
-              <select name="vehicleId" required>
-                {vehicles.map((vehicle) => (
-                  <option key={vehicle.id} value={vehicle.id}>{vehicle.customer.name} · {vehicle.year} {vehicle.make} {vehicle.model}</option>
-                ))}
-              </select>
-            </label>
-            <label>Mileage<input name="mileage" type="number" min={0} required /></label>
-            <label>Date<input name="loggedAt" type="date" defaultValue={yyyyMmDd(new Date())} /></label>
-            <label>Source<select name="source"><option>service</option><option>phone update</option><option>inspection</option></select></label>
-            <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="confirmLowerMileage" /> Confirm lower mileage</label>
-            <button className="button" type="submit"><Gauge /> Learn mileage</button>
-          </form>
-
           <details className="panel inline-details">
             <summary className="button ghost"><Plus /> Add Maintenance Item</summary>
             <form className="form" action={createMaintenanceItemAction}>

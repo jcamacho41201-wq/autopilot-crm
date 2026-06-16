@@ -174,6 +174,7 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
                         <h3><Car size={17} /> {vehicle.year} {vehicle.make} {vehicle.model}</h3>
                         <p>{vehicle.trim ? `${vehicle.trim} · ` : ""}{vehicle.vehicleType ?? "Vehicle"} · {vehicle.currentMileage.toLocaleString()} mi · {annualMiles.toLocaleString()} learned miles/year</p>
                         <p>VIN {vehicle.vin ?? "not set"} · Plate {vehicle.licensePlate ?? "not set"} · Last service {vehicle.serviceRecords[0]?.mileage.toLocaleString() ?? "none"} mi</p>
+                        <Link className="text-link" href={`/app/customers/${customer.id}/vehicles/${vehicle.id}`}>Open Vehicle Dashboard</Link>
                       </div>
                       <span className={`badge ${vehicleScore < 35 ? "danger" : vehicleScore < 60 ? "warn" : "ok"}`}>{vehicleScore}/100</span>
                     </summary>
@@ -201,15 +202,10 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
                       </div>
                       <label>Trim<input name="trim" defaultValue={vehicle.trim ?? ""} /></label>
                       <div className="form-row">
-                        <label>Mileage<input name="currentMileage" type="number" min={0} defaultValue={vehicle.currentMileage} required /></label>
-                        <label>Driving profile<input name="estimatedMilesYear" type="number" min={0} defaultValue={annualMiles} /></label>
-                      </div>
-                      <div className="form-row">
                         <label>VIN<input name="vin" defaultValue={vehicle.vin ?? ""} /></label>
                         <label>Plate<input name="licensePlate" defaultValue={vehicle.licensePlate ?? ""} /></label>
                       </div>
                       <label>Vehicle notes<textarea name="notes" defaultValue={vehicle.notes ?? ""} /></label>
-                      <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="confirmLowerMileage" /> Confirm lower mileage</label>
                       <button className="button secondary" type="submit"><Save /> Save vehicle</button>
                     </form>
                     <form className="form danger-zone" action={deleteVehicleAction}>
@@ -370,25 +366,6 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
               <a className="button secondary" href={phoneHref(customer.phone, "sms")}><MessageSquareText /> Send SMS</a>
               <a className="button secondary" href={customer.email ? `mailto:${customer.email}` : "#"} aria-disabled={!customer.email}><Mail /> Send Email</a>
               <Link className="button" href="/app/calendar"><CalendarPlus /> Book Appointment</Link>
-            </div>
-          </div>
-
-          <div className="panel">
-            <h2>Driving Profile</h2>
-            <div className="list">
-              {customer.vehicles.length ? customer.vehicles.map((vehicle) => {
-                const annualMiles = estimateAnnualMiles({ ...vehicle, mileageLogs: vehicle.mileageLogs });
-                const dailyMiles = Math.round(annualMiles / 365);
-                const accuracy = vehicle.mileageLogs.length >= 3 ? "High" : vehicle.mileageLogs.length >= 2 ? "Medium" : "Default";
-                return (
-                  <div className="card" key={vehicle.id}>
-                    <strong>{vehicle.year} {vehicle.make} {vehicle.model}</strong>
-                    <p>{annualMiles.toLocaleString()} miles/year · {dailyMiles.toLocaleString()} miles/day · {accuracy} accuracy</p>
-                    <p>{vehicle.mileageLogs.length} mileage readings · last reading {vehicle.mileageLogs[0]?.mileage.toLocaleString() ?? vehicle.currentMileage.toLocaleString()} mi</p>
-                    <div className="mini-row"><span>Mileage history</span><strong>{vehicle.mileageLogs.slice(0, 4).map((log) => log.mileage.toLocaleString()).join(" / ") || "None"}</strong></div>
-                  </div>
-                );
-              }) : <p>No driving profile yet.</p>}
             </div>
           </div>
 

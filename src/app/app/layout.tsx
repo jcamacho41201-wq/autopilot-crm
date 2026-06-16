@@ -8,7 +8,6 @@ const nav: { href: string; label: string; Icon: LucideIcon }[] = [
   { href: "/app", label: "Dashboard", Icon: BarChart3 },
   { href: "/app/customers", label: "Customers", Icon: Users },
   { href: "/app/maintenance", label: "Maintenance", Icon: Wrench },
-  { href: "/app/settings/service-library", label: "Service Library", Icon: PackageSearch },
   { href: "/app/calendar", label: "Calendar", Icon: CalendarDays },
   { href: "/app/reminders", label: "Reminders", Icon: MessageSquareText },
   { href: "/app/forecast", label: "Forecast", Icon: Gauge },

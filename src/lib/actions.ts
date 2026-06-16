@@ -1147,24 +1147,29 @@ export async function updateServiceLibraryAction(formData: FormData) {
   const user = await requireUser();
   const serviceId = stringValue(formData, "serviceId");
   const service = await prisma.service.findFirst({ where: { id: serviceId, shopId: user.shopId } });
-  if (!service) return;
-  await prisma.service.update({
-    where: { id: service.id },
-    data: {
-      name: stringValue(formData, "name"),
-      category: stringValue(formData, "category", "Custom"),
-      defaultMileageInterval: Math.max(1, numberValue(formData, "defaultMileageInterval", service.defaultMileageInterval)),
-      defaultTimeIntervalMonths: Math.max(1, numberValue(formData, "defaultTimeIntervalMonths", service.defaultTimeIntervalMonths)),
-      averagePrice: Math.max(0, numberValue(formData, "averagePrice", service.averagePrice)),
-      defaultReminderThreshold: Math.max(0, Math.min(100, numberValue(formData, "defaultReminderThreshold", service.defaultReminderThreshold))),
-      description: stringValue(formData, "description") || null,
-      recommendedNotes: stringValue(formData, "recommendedNotes") || null,
-      status: stringValue(formData, "status", service.status)
-    }
-  });
+  if (!service) failWithMessage(formData, "/app/settings/service-library", "Service could not be found.");
+  try {
+    await prisma.service.update({
+      where: { id: service.id },
+      data: {
+        name: stringValue(formData, "name"),
+        category: stringValue(formData, "category", "Custom"),
+        defaultMileageInterval: Math.max(1, numberValue(formData, "defaultMileageInterval", service.defaultMileageInterval)),
+        defaultTimeIntervalMonths: Math.max(1, numberValue(formData, "defaultTimeIntervalMonths", service.defaultTimeIntervalMonths)),
+        averagePrice: Math.max(0, numberValue(formData, "averagePrice", service.averagePrice)),
+        defaultReminderThreshold: Math.max(0, Math.min(100, numberValue(formData, "defaultReminderThreshold", service.defaultReminderThreshold))),
+        description: stringValue(formData, "description") || null,
+        recommendedNotes: stringValue(formData, "recommendedNotes") || null,
+        status: stringValue(formData, "status", service.status)
+      }
+    });
+  } catch {
+    failWithMessage(formData, "/app/settings/service-library", "Service update failed.");
+  }
   revalidatePath("/app/settings/service-library");
   revalidatePath("/app/maintenance");
   revalidatePath("/app");
+  redirect("/app/settings/service-library?success=Service%20Updated%20Successfully");
 }
 
 export async function duplicateServiceLibraryAction(formData: FormData) {
@@ -1259,6 +1264,85 @@ export async function deleteServicePackageAction(formData: FormData) {
   if (!servicePackage) return;
   await prisma.servicePackage.delete({ where: { id: servicePackage.id } });
   revalidatePath("/app/settings/service-library");
+}
+
+export async function duplicateServicePackageAction(formData: FormData) {
+  const user = await requireUser();
+  const servicePackage = await prisma.servicePackage.findFirst({
+    where: { id: stringValue(formData, "packageId"), shopId: user.shopId },
+    include: { items: true }
+  });
+  if (!servicePackage) return;
+  await prisma.servicePackage.create({
+    data: {
+      shopId: user.shopId,
+      name: `${servicePackage.name} Copy`,
+      description: servicePackage.description,
+      status: servicePackage.status,
+      items: {
+        create: servicePackage.items.map((item) => ({ serviceId: item.serviceId }))
+      }
+    }
+  });
+  revalidatePath("/app/settings/service-library");
+}
+
+const industryTemplates: Record<string, Array<{
+  name: string;
+  category: string;
+  defaultMileageInterval: number;
+  defaultTimeIntervalMonths: number;
+  averagePrice: number;
+  defaultReminderThreshold: number;
+  description: string;
+}>> = {
+  "Quick Lube Shop": [
+    { name: "Oil change", category: "Fluids", defaultMileageInterval: 5000, defaultTimeIntervalMonths: 6, averagePrice: 90, defaultReminderThreshold: 20, description: "Standard engine oil and filter service." },
+    { name: "Tire rotation", category: "Inspection", defaultMileageInterval: 6000, defaultTimeIntervalMonths: 6, averagePrice: 65, defaultReminderThreshold: 15, description: "Rotate tires and inspect tread wear." },
+    { name: "Air filter", category: "Filters", defaultMileageInterval: 15000, defaultTimeIntervalMonths: 12, averagePrice: 55, defaultReminderThreshold: 20, description: "Replace engine air filter." },
+    { name: "Cabin filter", category: "Filters", defaultMileageInterval: 15000, defaultTimeIntervalMonths: 12, averagePrice: 55, defaultReminderThreshold: 20, description: "Replace cabin air filter." }
+  ],
+  "Independent Repair Shop": [
+    { name: "Brake inspection", category: "Brakes", defaultMileageInterval: 12000, defaultTimeIntervalMonths: 12, averagePrice: 120, defaultReminderThreshold: 10, description: "Inspect pads, rotors, calipers, and brake fluid condition." },
+    { name: "Brake pads", category: "Brakes", defaultMileageInterval: 40000, defaultTimeIntervalMonths: 36, averagePrice: 650, defaultReminderThreshold: 10, description: "Replace brake pads and inspect braking hardware." },
+    { name: "Coolant flush", category: "Cooling System", defaultMileageInterval: 30000, defaultTimeIntervalMonths: 36, averagePrice: 180, defaultReminderThreshold: 15, description: "Cooling system flush and refill." },
+    { name: "Spark plugs", category: "Engine", defaultMileageInterval: 90000, defaultTimeIntervalMonths: 72, averagePrice: 420, defaultReminderThreshold: 10, description: "Replace spark plugs and inspect ignition components." }
+  ],
+  "Fleet Maintenance": [
+    { name: "Fleet inspection", category: "Inspection", defaultMileageInterval: 10000, defaultTimeIntervalMonths: 3, averagePrice: 180, defaultReminderThreshold: 15, description: "Recurring fleet safety and maintenance inspection." },
+    { name: "DOT inspection", category: "Inspection", defaultMileageInterval: 12000, defaultTimeIntervalMonths: 12, averagePrice: 220, defaultReminderThreshold: 15, description: "Annual DOT-style vehicle inspection." },
+    { name: "Transmission service", category: "Fluids", defaultMileageInterval: 60000, defaultTimeIntervalMonths: 48, averagePrice: 320, defaultReminderThreshold: 15, description: "Transmission fluid and service inspection." }
+  ],
+  "Diesel Shop": [
+    { name: "Diesel oil service", category: "Fluids", defaultMileageInterval: 7500, defaultTimeIntervalMonths: 6, averagePrice: 180, defaultReminderThreshold: 20, description: "Diesel engine oil and filter service." },
+    { name: "Fuel filter", category: "Filters", defaultMileageInterval: 15000, defaultTimeIntervalMonths: 12, averagePrice: 160, defaultReminderThreshold: 20, description: "Replace diesel fuel filter." },
+    { name: "DEF system inspection", category: "Electrical", defaultMileageInterval: 20000, defaultTimeIntervalMonths: 12, averagePrice: 140, defaultReminderThreshold: 15, description: "Inspect DEF system and emissions components." }
+  ],
+  Dealership: [
+    { name: "Factory scheduled maintenance", category: "Inspection", defaultMileageInterval: 30000, defaultTimeIntervalMonths: 24, averagePrice: 520, defaultReminderThreshold: 15, description: "OEM interval package inspection and services." },
+    { name: "Warranty inspection", category: "Inspection", defaultMileageInterval: 12000, defaultTimeIntervalMonths: 12, averagePrice: 95, defaultReminderThreshold: 10, description: "Warranty-related inspection and documentation." },
+    { name: "Software update inspection", category: "Electrical", defaultMileageInterval: 15000, defaultTimeIntervalMonths: 12, averagePrice: 85, defaultReminderThreshold: 15, description: "Check vehicle module update availability." }
+  ]
+};
+
+export async function importServiceTemplateAction(formData: FormData) {
+  const user = await requireUser();
+  const template = stringValue(formData, "template");
+  const services = industryTemplates[template] ?? [];
+  if (!services.length) return;
+  const existing = await prisma.service.findMany({
+    where: { shopId: user.shopId, name: { in: services.map((service) => service.name) } },
+    select: { name: true }
+  });
+  const existingNames = new Set(existing.map((service) => service.name));
+  const toCreate = services.filter((service) => !existingNames.has(service.name));
+  if (toCreate.length) {
+    await prisma.service.createMany({
+      data: toCreate.map((service) => ({ shopId: user.shopId, ...service }))
+    });
+  }
+  revalidatePath("/app/settings/service-library");
+  redirect(`/app/settings/service-library?success=${encodeURIComponent(`${template} templates imported`)}`);
 }
 
 async function assignServicesToVehicle(params: {

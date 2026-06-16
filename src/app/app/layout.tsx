@@ -22,11 +22,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <div className="shell">
       <aside className="sidebar">
         <Link className="brand" href="/app">
-          <span className="brand-mark"><Gauge /></span>
-          <span>AutoPilot CRM</span>
+          <span className="brand-mark"><Wrench /></span>
+          <span>Maintiva</span>
         </Link>
         <div>
-          <p className="eyebrow" style={{ color: "#9db2a8" }}>{user.shop.name}</p>
+          <p className="eyebrow" style={{ color: "#9999aa" }}>{user.shop.name}</p>
           <span className="badge">{user.shop.plan} plan</span>
         </div>
         <nav className="nav">

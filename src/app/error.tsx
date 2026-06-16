@@ -8,7 +8,7 @@ export default function RootError({ error, reset }: { error: Error & { digest?: 
     <main className="auth-page">
       <section className="auth-box panel">
         <p className="eyebrow">Recovery mode</p>
-        <h1 style={{ fontSize: "2rem" }}>AutoPilot CRM hit a server error</h1>
+        <h1 style={{ fontSize: "2rem" }}>Maintiva hit a server error</h1>
         <p>
           The most common cause is a production database that is missing the latest Prisma migrations
           or a missing `DATABASE_URL` environment variable.

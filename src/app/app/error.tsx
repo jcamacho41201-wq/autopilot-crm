@@ -8,7 +8,7 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
     <main className="main">
       <section className="panel narrow-panel">
         <p className="eyebrow">Recovery mode</p>
-        <h1 style={{ fontSize: "2rem" }}>AutoPilot CRM could not load this view</h1>
+        <h1 style={{ fontSize: "2rem" }}>Maintiva could not load this view</h1>
         <p>
           This usually happens when the production database has not received the latest Prisma migrations,
           or when required database environment variables are missing.

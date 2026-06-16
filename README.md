@@ -1,6 +1,6 @@
-# AutoPilot CRM
+# Maintiva
 
-AutoPilot CRM is a working SaaS MVP for independent auto repair shops. It tracks customers, vehicles, service mileage, predictive maintenance, reminders, appointments, inventory scans, deferred work, revenue forecasts, and simple technician efficiency.
+Maintiva is a working SaaS MVP for modern auto repair shops. It tracks customers, vehicles, service mileage, predictive maintenance, reminders, appointments, inventory scans, deferred work, revenue forecasts, and simple technician efficiency.
 
 ## Run locally
 
@@ -16,7 +16,7 @@ pnpm dev
 
 Demo login:
 
-- Email: `owner@autopilot.local`
+- Email: `owner@maintiva.local`
 - Password: `password123`
 
 The public booking demo URL is `/booking/demo-auto-care`.

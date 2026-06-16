@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarPlus, Gauge } from "lucide-react";
+import { CalendarPlus, Wrench } from "lucide-react";
 import { createPublicBookingAction } from "@/lib/actions";
 import { prisma } from "@/lib/prisma";
 import { dateTimeInputValue } from "@/lib/format";
@@ -10,7 +10,7 @@ export default async function PublicBookingPage({ params, searchParams }: { para
     return (
       <main className="booking-page section">
         <h1>Booking link not found</h1>
-        <Link href="/">Go to AutoPilot CRM</Link>
+        <Link href="/">Go to Maintiva</Link>
       </main>
     );
   }
@@ -23,8 +23,8 @@ export default async function PublicBookingPage({ params, searchParams }: { para
     <main className="booking-page">
       <section className="section">
         <Link className="brand" href="/">
-          <span className="brand-mark"><Gauge /></span>
-          AutoPilot CRM
+          <span className="brand-mark"><Wrench /></span>
+          Maintiva
         </Link>
       </section>
       <section className="section split">

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Gauge, Rocket } from "lucide-react";
+import { Rocket, Wrench } from "lucide-react";
 import { signupAction } from "@/lib/actions";
 
 export default function SignupPage({ searchParams }: { searchParams: { plan?: string } }) {
@@ -7,8 +7,8 @@ export default function SignupPage({ searchParams }: { searchParams: { plan?: st
     <main className="auth-page">
       <div className="auth-box panel">
         <Link className="brand" href="/">
-          <span className="brand-mark"><Gauge /></span>
-          AutoPilot CRM
+          <span className="brand-mark"><Wrench /></span>
+          Maintiva
         </Link>
         <h1 style={{ fontSize: "2rem", marginTop: 24 }}>Create your shop</h1>
         <p>Set up a tenant account, owner login, default services, reminder rules, and booking link.</p>

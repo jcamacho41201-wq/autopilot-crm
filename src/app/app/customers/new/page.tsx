@@ -12,7 +12,7 @@ export default async function NewCustomerPage() {
         <div>
           <p className="eyebrow">Customer CRM</p>
           <h1>Add Customer</h1>
-          <p>Add the customer and their first vehicle. AutoPilot will create the default maintenance plan automatically.</p>
+          <p>Add the customer and their first vehicle. Maintiva will create the default maintenance plan automatically.</p>
         </div>
         <Link className="button secondary" href="/app/customers"><ArrowLeft /> Customers</Link>
       </header>

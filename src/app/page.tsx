@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, BarChart3, CalendarDays, Gauge, MessageSquareText } from "lucide-react";
+import { ArrowRight, BarChart3, CalendarDays, Gauge, MessageSquareText, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { currentUser } from "@/lib/auth";
 import { redirect } from "next/navigation";
@@ -19,8 +19,8 @@ export default async function HomePage() {
     <main className="marketing-page">
       <nav className="marketing-nav">
         <Link className="brand" href="/">
-          <span className="brand-mark"><Gauge /></span>
-          AutoPilot CRM
+          <span className="brand-mark"><Wrench /></span>
+          Maintiva
         </Link>
         <div className="row">
           <Link href="/pricing">Pricing</Link>
@@ -29,11 +29,11 @@ export default async function HomePage() {
       </nav>
       <section className="marketing-hero">
         <div className="marketing-copy">
-          <p className="eyebrow">Predictive maintenance CRM</p>
-          <h1>AutoPilot CRM</h1>
+          <p className="eyebrow">Predict Maintenance. Drive Revenue.</p>
+          <h1>Maintiva</h1>
           <p>
-            Helps repair shops predict future maintenance, automatically text customers booking links,
-            fill future calendar openings, and forecast upcoming revenue.
+            Predictive maintenance, automated customer retention, and intelligent shop management
+            for modern repair shops.
           </p>
           <div className="row" style={{ justifyContent: "flex-start" }}>
             <Link className="button" href="/signup">

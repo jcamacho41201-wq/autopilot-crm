@@ -70,13 +70,13 @@ async function main() {
         create: [
           {
             name: "Avery Owner",
-            email: "owner@autopilot.local",
+            email: "owner@maintiva.local",
             passwordHash: await hashPassword("password123"),
             role: "OWNER"
           },
           {
             name: "Mia Mechanic",
-            email: "mechanic@autopilot.local",
+            email: "mechanic@maintiva.local",
             passwordHash: await hashPassword("password123"),
             role: "MECHANIC"
           }
@@ -222,7 +222,7 @@ async function main() {
     ]
   });
 
-  console.log("Seeded AutoPilot CRM demo data.");
+  console.log("Seeded Maintiva demo data.");
 }
 
 main()

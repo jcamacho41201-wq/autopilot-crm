@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { Check, Gauge } from "lucide-react";
+import { Check, Wrench } from "lucide-react";
 
 const tiers = [
-  ["Starter", "$99", "Core CRM, dashboard, reminders, and booking."],
+  ["Starter", "$99", "Core customer profiles, dashboard, reminders, and booking."],
   ["Growth", "$249", "Forecasting, inventory intelligence, and team workflows."],
   ["Pro", "$499", "Multi-location ready structure, advanced capacity planning, and priority support."]
 ];
@@ -12,8 +12,8 @@ export default function PricingPage() {
     <main className="marketing-page">
       <nav className="marketing-nav" style={{ color: "var(--ink)", position: "static" }}>
         <Link className="brand" href="/">
-          <span className="brand-mark"><Gauge /></span>
-          AutoPilot CRM
+          <span className="brand-mark"><Wrench /></span>
+          Maintiva
         </Link>
         <Link className="button" href="/signup">Start trial</Link>
       </nav>

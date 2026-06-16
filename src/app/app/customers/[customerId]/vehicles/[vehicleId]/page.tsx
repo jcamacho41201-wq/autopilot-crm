@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CalendarPlus, CheckCircle2, Gauge, MessageSquareText, Plus, Save, Trash2, Wrench } from "lucide-react";
+import { ArrowLeft, CalendarPlus, CheckCircle2, FileText, Gauge, MessageSquareText, Plus, Save, Trash2, Wrench } from "lucide-react";
 import {
   addMileageAction,
   applyRecommendedServicesAction,
@@ -12,6 +12,8 @@ import {
   deleteMaintenanceItemAction,
   deleteVehicleAction,
   flagMileageCorrectionAction,
+  generateQuoteFromMaintenanceAction,
+  generateQuoteFromServiceRecordAction,
   sendMockReminderAction,
   updateMileageLogAction,
   updateMaintenanceItemAction,
@@ -98,7 +100,8 @@ export default async function VehicleDashboardPage({
       maintenanceItems: { include: { service: true } },
       serviceRecords: { orderBy: { serviceDate: "desc" }, take: 12 },
       appointments: { orderBy: { scheduledAt: "asc" }, take: 12 },
-      opportunities: { where: { status: "OPEN" } }
+      opportunities: { where: { status: "OPEN" } },
+      quotes: { orderBy: { updatedAt: "desc" }, take: 8 }
     }
   });
   if (!vehicle) notFound();
@@ -135,6 +138,9 @@ export default async function VehicleDashboardPage({
     : 100;
   const opportunityRows = rows.filter((row) => row.prediction.status !== "Healthy");
   const potentialRevenue = opportunityRows.reduce((sum, row) => sum + row.item.averagePrice, 0);
+  const pendingQuoteRevenue = vehicle.quotes
+    .filter((quote) => quote.status === "DRAFT" || quote.status === "SENT")
+    .reduce((sum, quote) => sum + quote.total, 0);
   const highestPriority = opportunityRows[0] ?? rows[0];
   const lastVisit = vehicle.serviceRecords[0]?.serviceDate;
   const nextAppointment = vehicle.appointments
@@ -171,10 +177,11 @@ export default async function VehicleDashboardPage({
       </header>
       {searchParams.error ? <p className="badge danger" style={{ marginBottom: 16 }}>{searchParams.error}</p> : null}
 
-      <section className="grid grid-4">
+      <section className="grid grid-5">
         <div className="card stat"><span className="muted">Current Mileage</span><strong>{vehicle.currentMileage.toLocaleString()}</strong><span className="badge">Vehicle profile</span></div>
         <div className="card stat"><span className="muted">Vehicle Health</span><strong>{healthScore}/100</strong><span className={`badge ${healthScore < 35 ? "danger" : healthScore < 60 ? "warn" : "ok"}`}>Predicted</span></div>
         <div className="card stat"><span className="muted">Potential Revenue</span><strong>{money.format(potentialRevenue)}</strong><span className="badge warn">{opportunityRows.length} open</span></div>
+        <div className="card stat"><span className="muted">Pending Quotes</span><strong>{money.format(pendingQuoteRevenue)}</strong><span className="badge">{vehicle.quotes.length} quotes</span></div>
         <div className="card stat"><span className="muted">Next Appointment</span><strong>{nextAppointment ? dateLabel(nextAppointment.scheduledAt) : "None"}</strong><span className="badge">Calendar</span></div>
       </section>
 
@@ -470,9 +477,14 @@ export default async function VehicleDashboardPage({
             <div className="list">
               {vehicle.serviceRecords.length ? vehicle.serviceRecords.map((record) => (
                 <div className="card" key={record.id}>
-                  <div className="row"><strong>{record.summary}</strong><span className="badge">{money.format(record.revenue)}</span></div>
-                  <p>{dateLabel(record.serviceDate)} · {record.mileage.toLocaleString()} mi · {record.notes ?? "No notes"}</p>
-                </div>
+                <div className="row"><strong>{record.summary}</strong><span className="badge">{money.format(record.revenue)}</span></div>
+                <p>{dateLabel(record.serviceDate)} · {record.mileage.toLocaleString()} mi · {record.notes ?? "No notes"}</p>
+                <form action={generateQuoteFromServiceRecordAction} style={{ marginTop: 10 }}>
+                  <input type="hidden" name="serviceRecordId" value={record.id} />
+                  <input type="hidden" name="estimatedRevenue" value={record.revenue || 120} />
+                  <button className="button secondary" type="submit"><FileText /> Follow-Up Quote</button>
+                </form>
+              </div>
               )) : <p>No service records yet.</p>}
             </div>
           </div>
@@ -525,6 +537,12 @@ export default async function VehicleDashboardPage({
                   <button className="button secondary" type="submit"><MessageSquareText /> Send Reminder</button>
                 </form>
               ) : <button className="button secondary" type="button" disabled><MessageSquareText /> Send Reminder</button>}
+              {opportunityRows.length ? (
+                <form action={generateQuoteFromMaintenanceAction}>
+                  {opportunityRows.map((row) => <input key={row.item.id} type="hidden" name="maintenanceIds" value={row.item.id} />)}
+                  <button className="button" type="submit"><FileText /> Generate Quote</button>
+                </form>
+              ) : <Link className="button secondary" href="/app/quotes"><FileText /> Create Quote</Link>}
               <a className="button secondary" href="#maintenance-schedule">View Maintenance Schedule</a>
             </div>
           </div>

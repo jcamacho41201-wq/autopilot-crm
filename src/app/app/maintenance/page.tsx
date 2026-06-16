@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { CalendarPlus, MessageSquareText, Send, Wrench } from "lucide-react";
-import { createAppointmentAction, sendMockReminderAction } from "@/lib/actions";
+import { CalendarPlus, FileText, MessageSquareText, Send, Wrench } from "lucide-react";
+import { createAppointmentAction, generateQuoteFromMaintenanceAction, sendMockReminderAction } from "@/lib/actions";
 import { requireUser } from "@/lib/auth";
 import { dateLabel, dateTimeInputValue, money, number } from "@/lib/format";
 import { buildMaintenanceQueue, isOpenMaintenanceOpportunity, type MaintenanceQueueRow, type MaintenanceQueueSource } from "@/lib/maintenanceQueue";
@@ -82,6 +82,15 @@ function ReminderForm({ maintenanceId, label = "Send Reminder" }: { maintenanceI
     <form action={sendMockReminderAction}>
       <input type="hidden" name="maintenanceId" value={maintenanceId} />
       <button className="button secondary" type="submit"><MessageSquareText /> {label}</button>
+    </form>
+  );
+}
+
+function QuoteForm({ rows }: { rows: MaintenanceQueueRow[] }) {
+  return (
+    <form action={generateQuoteFromMaintenanceAction}>
+      {rows.map((row) => <input key={row.item.id} type="hidden" name="maintenanceIds" value={row.item.id} />)}
+      <button className="button" type="submit"><FileText /> Generate Quote</button>
     </form>
   );
 }
@@ -170,6 +179,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                     <Link className="button secondary" href={`/app/customers/${card.customer.id}/vehicles/${card.vehicle.id}`}><Wrench /> Open Vehicle</Link>
                     <ReminderForm maintenanceId={highest?.item.id} />
                     <AppointmentForm customerId={card.customer.id} vehicleId={card.vehicle.id} serviceName={primaryService} revenue={primaryRevenue} />
+                    <QuoteForm rows={card.opportunityRows} />
                   </div>
                   <div className="table-wrap">
                     <table>

@@ -136,6 +136,17 @@ textarea {
   color: white;
 }
 
+.nav a.active {
+  background: rgba(139, 92, 246, 0.18);
+  color: white;
+  font-weight: 800;
+  box-shadow: inset 4px 0 0 #a78bfa;
+}
+
+.nav a.active svg {
+  color: #a78bfa;
+}
+
 .nav svg,
 .button svg,
 .icon-button svg {
@@ -146,6 +157,78 @@ textarea {
 .main {
   min-width: 0;
   padding: 28px;
+}
+
+.global-search {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  margin: -10px 0 18px;
+}
+
+.global-search label {
+  width: min(720px, 100%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--shadow);
+  padding: 10px 12px;
+}
+
+.global-search input {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  width: 100%;
+}
+
+.search-results-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(720px, 100%);
+  max-height: min(560px, calc(100vh - 120px));
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 12px;
+}
+
+.search-result-group {
+  display: grid;
+  gap: 6px;
+}
+
+.search-result-group + .search-result-group {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.search-result-group > strong {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.search-result-group a {
+  display: grid;
+  gap: 2px;
+  border-radius: 8px;
+  padding: 9px;
+}
+
+.search-result-group a:hover {
+  background: var(--surface-2);
+}
+
+.search-result-group small {
+  color: var(--muted);
 }
 
 .topbar {
@@ -1053,6 +1136,53 @@ textarea {
   font-weight: 800;
 }
 
+.quote-paper {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.quote-totals {
+  width: min(340px, 100%);
+  margin: 18px 0 0 auto;
+  display: grid;
+  gap: 8px;
+}
+
+.quote-total {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  font-size: 1.18rem;
+}
+
+.break-word {
+  overflow-wrap: anywhere;
+}
+
+.public-quote-page {
+  min-height: 100vh;
+  background: var(--bg);
+  padding: 32px;
+}
+
+.public-quote-shell {
+  width: min(980px, 100%);
+  margin: 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+
+.quote-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
 .modal-details[open]::before {
   content: "";
   position: fixed;
@@ -1149,6 +1279,11 @@ textarea {
   .split {
     grid-template-columns: 1fr;
   }
+
+  .global-search {
+    position: relative;
+    margin-top: 0;
+  }
 }
 
 @media (max-width: 620px) {
@@ -1184,7 +1319,39 @@ textarea {
     padding: 18px;
   }
 
+  .public-quote-page {
+    padding: 14px;
+  }
+
   h1 {
     font-size: 2.15rem;
+  }
+}
+
+@media print {
+  .sidebar,
+  .global-search,
+  .topbar .row,
+  aside,
+  .button,
+  .nav {
+    display: none !important;
+  }
+
+  .shell {
+    display: block;
+  }
+
+  .main,
+  .public-quote-page {
+    padding: 0;
+    background: white;
+  }
+
+  .panel,
+  .card,
+  .quote-paper,
+  .public-quote-shell {
+    box-shadow: none;
   }
 }

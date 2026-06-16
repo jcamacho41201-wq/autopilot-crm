@@ -1,5 +1,6 @@
 "use server";
 
+import crypto from "crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createSession, currentUser, hashPassword, requireUser, signOut, verifyPassword } from "@/lib/auth";
@@ -977,6 +978,346 @@ async function createAppointmentForShop(shopId: string, formData: FormData) {
       notes: stringValue(formData, "notes") || null
     }
   });
+}
+
+type QuoteLineInput = {
+  lineType: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  sourceType?: string;
+  sourceId?: string;
+};
+
+function quoteExpirationDate() {
+  const date = new Date();
+  date.setDate(date.getDate() + 14);
+  return date;
+}
+
+function normalizeQuoteLine(line: QuoteLineInput) {
+  const quantity = Math.max(0, Number.isFinite(line.quantity) ? line.quantity : 1);
+  const unitPrice = Math.max(0, Number.isFinite(line.unitPrice) ? line.unitPrice : 0);
+  const rawTotal = quantity * unitPrice;
+  const total = line.lineType === "DISCOUNT" ? -Math.abs(rawTotal) : rawTotal;
+  return {
+    lineType: line.lineType,
+    description: line.description,
+    quantity,
+    unitPrice,
+    total,
+    sourceType: line.sourceType ?? null,
+    sourceId: line.sourceId ?? null
+  };
+}
+
+function quoteTotals(lines: Array<ReturnType<typeof normalizeQuoteLine>>) {
+  const subtotal = lines
+    .filter((line) => line.lineType !== "TAX" && line.lineType !== "DISCOUNT")
+    .reduce((sum, line) => sum + line.total, 0);
+  const discountTotal = Math.abs(lines.filter((line) => line.lineType === "DISCOUNT").reduce((sum, line) => sum + line.total, 0));
+  const taxTotal = lines.filter((line) => line.lineType === "TAX").reduce((sum, line) => sum + line.total, 0);
+  return {
+    subtotal,
+    discountTotal,
+    taxTotal,
+    total: Math.max(0, subtotal - discountTotal + taxTotal)
+  };
+}
+
+async function nextQuoteNumber(shopId: string) {
+  const count = await prisma.quote.count({ where: { shopId } });
+  return `Q-${String(count + 1).padStart(5, "0")}`;
+}
+
+async function createQuoteForShop(params: {
+  shopId: string;
+  customerId: string;
+  vehicleId: string;
+  serviceRecordId?: string | null;
+  status?: string;
+  notes?: string | null;
+  expirationDate?: Date;
+  lines: QuoteLineInput[];
+}) {
+  const lines = params.lines
+    .filter((line) => line.description.trim())
+    .map((line) => normalizeQuoteLine(line));
+  if (!lines.length) return null;
+  const totals = quoteTotals(lines);
+  return prisma.quote.create({
+    data: {
+      shopId: params.shopId,
+      customerId: params.customerId,
+      vehicleId: params.vehicleId,
+      serviceRecordId: params.serviceRecordId ?? null,
+      quoteNumber: await nextQuoteNumber(params.shopId),
+      status: params.status ?? "DRAFT",
+      expirationDate: params.expirationDate ?? quoteExpirationDate(),
+      notes: params.notes ?? null,
+      shareToken: crypto.randomBytes(24).toString("hex"),
+      ...totals,
+      lines: { create: lines }
+    },
+    include: { lines: true }
+  });
+}
+
+async function maintenanceQuoteLines(shopId: string, maintenanceIds: string[]) {
+  if (!maintenanceIds.length) return { lines: [] as QuoteLineInput[], first: null as null | { customerId: string; vehicleId: string } };
+  const items = await prisma.maintenanceItem.findMany({
+    where: {
+      id: { in: maintenanceIds },
+      vehicle: { customer: { shopId } }
+    },
+    include: { vehicle: true }
+  });
+  return {
+    first: items[0] ? { customerId: items[0].vehicle.customerId, vehicleId: items[0].vehicleId } : null,
+    lines: items.map((item) => ({
+      lineType: "SERVICE",
+      description: item.name,
+      quantity: 1,
+      unitPrice: item.averagePrice,
+      sourceType: "MAINTENANCE",
+      sourceId: item.id
+    }))
+  };
+}
+
+export async function createQuoteAction(formData: FormData) {
+  const user = await requireUser();
+  const vehicleId = stringValue(formData, "vehicleId");
+  const vehicle = await prisma.vehicle.findFirst({
+    where: { id: vehicleId, customer: { shopId: user.shopId } }
+  });
+  if (!vehicle) failWithMessage(formData, "/app/quotes", "Select a valid customer and vehicle before creating a quote.");
+  const customerId = vehicle.customerId;
+
+  const maintenanceIds = stringValues(formData, "maintenanceIds");
+  const { lines } = await maintenanceQuoteLines(user.shopId, maintenanceIds);
+  const serviceIds = stringValues(formData, "serviceIds");
+  if (serviceIds.length) {
+    const services = await prisma.service.findMany({ where: { id: { in: serviceIds }, shopId: user.shopId } });
+    lines.push(...services.map((service) => ({
+      lineType: "SERVICE",
+      description: service.name,
+      quantity: 1,
+      unitPrice: service.averagePrice,
+      sourceType: "SERVICE",
+      sourceId: service.id
+    })));
+  }
+
+  const laborDescription = stringValue(formData, "laborDescription");
+  if (laborDescription) {
+    lines.push({
+      lineType: "LABOR",
+      description: laborDescription,
+      quantity: Math.max(0, numberValue(formData, "laborHours", 1)),
+      unitPrice: Math.max(0, numberValue(formData, "laborRate", 125))
+    });
+  }
+  const partDescription = stringValue(formData, "partDescription");
+  if (partDescription) {
+    lines.push({
+      lineType: "PART",
+      description: partDescription,
+      quantity: Math.max(0, numberValue(formData, "partQuantity", 1)),
+      unitPrice: Math.max(0, numberValue(formData, "partPrice", 0))
+    });
+  }
+  const lineTypes = formData.getAll("lineType").map((value) => String(value || "SERVICE"));
+  const descriptions = formData.getAll("lineDescription").map((value) => String(value ?? "").trim());
+  const quantities = formData.getAll("lineQuantity");
+  const unitPrices = formData.getAll("lineUnitPrice");
+  descriptions.forEach((description, index) => {
+    const type = lineTypes[index] || "SERVICE";
+    const quantity = Number(quantities[index] ?? 1);
+    const unitPrice = Number(unitPrices[index] ?? 0);
+    if (description.trim()) {
+      lines.push({
+        lineType: type,
+        description,
+        quantity: Number.isFinite(quantity) ? quantity : 1,
+        unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0
+      });
+    }
+  });
+  const shopFee = Math.max(0, numberValue(formData, "shopFee", 0));
+  if (shopFee) lines.push({ lineType: "FEE", description: "Shop supplies and fees", quantity: 1, unitPrice: shopFee });
+  const discountAmount = Math.max(0, numberValue(formData, "discountAmount", 0));
+  if (discountAmount) lines.push({ lineType: "DISCOUNT", description: "Discount", quantity: 1, unitPrice: discountAmount });
+  const taxableBase = quoteTotals(lines.map((line) => normalizeQuoteLine(line))).subtotal - discountAmount;
+  const taxRate = Math.max(0, numberValue(formData, "taxRate", 0));
+  if (taxRate) lines.push({ lineType: "TAX", description: `Tax (${taxRate}%)`, quantity: 1, unitPrice: Math.max(0, taxableBase * (taxRate / 100)) });
+
+  const quote = await createQuoteForShop({
+    shopId: user.shopId,
+    customerId,
+    vehicleId,
+    notes: stringValue(formData, "notes") || null,
+    expirationDate: optionalDateValue(formData, "expirationDate") ?? quoteExpirationDate(),
+    lines
+  });
+  if (!quote) failWithMessage(formData, "/app/quotes", "Add at least one service, labor, part, fee, or discount line.");
+  revalidatePath("/app/quotes");
+  revalidatePath("/app");
+  redirect(`/app/quotes/${quote.id}`);
+}
+
+export async function generateQuoteFromMaintenanceAction(formData: FormData) {
+  const user = await requireUser();
+  const maintenanceIds = stringValues(formData, "maintenanceIds");
+  const { first, lines } = await maintenanceQuoteLines(user.shopId, maintenanceIds);
+  if (!first || !lines.length) failWithMessage(formData, "/app/maintenance", "No maintenance services were selected for the quote.");
+  const quote = await createQuoteForShop({
+    shopId: user.shopId,
+    customerId: first.customerId,
+    vehicleId: first.vehicleId,
+    notes: "Generated from overdue and due-soon maintenance opportunities.",
+    lines
+  });
+  if (!quote) failWithMessage(formData, "/app/maintenance", "Quote could not be created.");
+  revalidatePath("/app/quotes");
+  revalidatePath("/app");
+  redirect(`/app/quotes/${quote.id}`);
+}
+
+export async function generateQuoteFromServiceRecordAction(formData: FormData) {
+  const user = await requireUser();
+  const record = await prisma.serviceRecord.findFirst({
+    where: { id: stringValue(formData, "serviceRecordId"), shopId: user.shopId },
+    include: { vehicle: true }
+  });
+  if (!record) return;
+  const description = record.nextRecommendedService || `Follow-up: ${record.summary}`;
+  const price = Math.max(0, numberValue(formData, "estimatedRevenue", record.revenue || 0));
+  const quote = await createQuoteForShop({
+    shopId: user.shopId,
+    customerId: record.customerId ?? record.vehicle.customerId,
+    vehicleId: record.vehicleId,
+    serviceRecordId: record.id,
+    notes: "Generated from service record follow-up.",
+    lines: [{ lineType: "SERVICE", description, quantity: 1, unitPrice: price, sourceType: "SERVICE_RECORD", sourceId: record.id }]
+  });
+  if (!quote) return;
+  revalidatePath("/app/quotes");
+  redirect(`/app/quotes/${quote.id}`);
+}
+
+export async function duplicateQuoteAction(formData: FormData) {
+  const user = await requireUser();
+  const quote = await prisma.quote.findFirst({
+    where: { id: stringValue(formData, "quoteId"), shopId: user.shopId },
+    include: { lines: true }
+  });
+  if (!quote) return;
+  const duplicate = await createQuoteForShop({
+    shopId: user.shopId,
+    customerId: quote.customerId,
+    vehicleId: quote.vehicleId,
+    serviceRecordId: quote.serviceRecordId,
+    notes: quote.notes,
+    lines: quote.lines.map((line) => ({
+      lineType: line.lineType,
+      description: line.description,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      sourceType: line.sourceType ?? undefined,
+      sourceId: line.sourceId ?? undefined
+    }))
+  });
+  revalidatePath("/app/quotes");
+  if (duplicate) redirect(`/app/quotes/${duplicate.id}`);
+}
+
+export async function updateQuoteStatusAction(formData: FormData) {
+  const user = await requireUser();
+  const quote = await prisma.quote.findFirst({ where: { id: stringValue(formData, "quoteId"), shopId: user.shopId } });
+  if (!quote) return;
+  const status = stringValue(formData, "status", quote.status);
+  await prisma.quote.update({
+    where: { id: quote.id },
+    data: {
+      status,
+      approvedAt: status === "APPROVED" ? new Date() : quote.approvedAt,
+      declinedAt: status === "DECLINED" ? new Date() : quote.declinedAt
+    }
+  });
+  revalidatePath("/app/quotes");
+  revalidatePath(`/app/quotes/${quote.id}`);
+  revalidatePath("/app");
+}
+
+export async function sendQuoteAction(formData: FormData) {
+  formData.set("status", "SENT");
+  await updateQuoteStatusAction(formData);
+}
+
+export async function convertQuoteToAppointmentAction(formData: FormData) {
+  const user = await requireUser();
+  const quote = await prisma.quote.findFirst({
+    where: { id: stringValue(formData, "quoteId"), shopId: user.shopId },
+    include: { lines: true }
+  });
+  if (!quote) return;
+  await prisma.appointment.create({
+    data: {
+      shopId: user.shopId,
+      customerId: quote.customerId,
+      vehicleId: quote.vehicleId,
+      scheduledAt: dateValue(formData, "scheduledAt", new Date(Date.now() + 86400000)),
+      durationMinutes: numberValue(formData, "durationMinutes", 120),
+      serviceName: quote.lines.filter((line) => line.lineType !== "TAX" && line.lineType !== "DISCOUNT").map((line) => line.description).join(", ").slice(0, 180) || quote.quoteNumber,
+      estimatedRevenue: quote.total,
+      notes: `Converted from quote ${quote.quoteNumber}.`
+    }
+  });
+  await prisma.quote.update({
+    where: { id: quote.id },
+    data: { status: quote.status === "APPROVED" ? "APPROVED" : "SENT" }
+  });
+  revalidatePath("/app/calendar");
+  revalidatePath("/app/quotes");
+  revalidatePath("/app");
+  redirect("/app/calendar");
+}
+
+export async function approvePublicQuoteAction(formData: FormData) {
+  const quote = await prisma.quote.findUnique({ where: { shareToken: stringValue(formData, "token") } });
+  if (!quote) return;
+  await prisma.quote.update({
+    where: { id: quote.id },
+    data: { status: "APPROVED", approvedAt: new Date(), declinedAt: null }
+  });
+  revalidatePath(`/quote/${quote.shareToken}`);
+  revalidatePath("/app/quotes");
+  redirect(`/quote/${quote.shareToken}?approved=1`);
+}
+
+export async function declinePublicQuoteAction(formData: FormData) {
+  const quote = await prisma.quote.findUnique({ where: { shareToken: stringValue(formData, "token") } });
+  if (!quote) return;
+  await prisma.quote.update({
+    where: { id: quote.id },
+    data: { status: "DECLINED", declinedAt: new Date(), approvedAt: null }
+  });
+  revalidatePath(`/quote/${quote.shareToken}`);
+  revalidatePath("/app/quotes");
+  redirect(`/quote/${quote.shareToken}?declined=1`);
+}
+
+export async function requestQuoteCallbackAction(formData: FormData) {
+  const quote = await prisma.quote.findUnique({ where: { shareToken: stringValue(formData, "token") } });
+  if (!quote) return;
+  await prisma.quote.update({
+    where: { id: quote.id },
+    data: { callbackRequestedAt: new Date() }
+  });
+  revalidatePath(`/quote/${quote.shareToken}`);
+  revalidatePath("/app/quotes");
+  redirect(`/quote/${quote.shareToken}?callback=1`);
 }
 
 export async function updateReminderRuleAction(formData: FormData) {

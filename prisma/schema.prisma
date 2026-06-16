@@ -28,6 +28,7 @@ model Shop {
   scanLogs           InventoryScanLog[]
   serviceRecords     ServiceRecord[]
   opportunities      DeferredOpportunity[]
+  quotes             Quote[]
 }
 
 model User {
@@ -67,6 +68,7 @@ model Customer {
   vehicles           Vehicle[]
   appointments       Appointment[]
   serviceRecords     ServiceRecord[]
+  quotes             Quote[]
 }
 
 model Vehicle {
@@ -91,6 +93,7 @@ model Vehicle {
   serviceRecords      ServiceRecord[]
   appointments        Appointment[]
   opportunities       DeferredOpportunity[]
+  quotes              Quote[]
 }
 
 model MileageLog {
@@ -206,6 +209,51 @@ model ServiceRecord {
   technician     Technician?           @relation(fields: [technicianId], references: [id], onDelete: SetNull)
   opportunities  DeferredOpportunity[]
   scanLogs       InventoryScanLog[]
+  quotes         Quote[]
+}
+
+model Quote {
+  id              String       @id @default(cuid())
+  shopId          String
+  customerId      String
+  vehicleId       String
+  serviceRecordId String?
+  quoteNumber     String
+  status          String       @default("DRAFT")
+  issueDate       DateTime     @default(now())
+  expirationDate  DateTime
+  subtotal        Float        @default(0)
+  discountTotal   Float        @default(0)
+  taxTotal        Float        @default(0)
+  total           Float        @default(0)
+  notes           String?
+  shareToken      String       @unique
+  approvedAt      DateTime?
+  declinedAt      DateTime?
+  callbackRequestedAt DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  shop            Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  customer        Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  vehicle         Vehicle      @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  serviceRecord   ServiceRecord? @relation(fields: [serviceRecordId], references: [id], onDelete: SetNull)
+  lines           QuoteLine[]
+
+  @@unique([shopId, quoteNumber])
+}
+
+model QuoteLine {
+  id          String   @id @default(cuid())
+  quoteId     String
+  lineType    String   @default("SERVICE")
+  description String
+  quantity    Float    @default(1)
+  unitPrice   Float    @default(0)
+  total       Float    @default(0)
+  sourceType  String?
+  sourceId    String?
+  createdAt   DateTime @default(now())
+  quote       Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
 }
 
 model ReminderRule {

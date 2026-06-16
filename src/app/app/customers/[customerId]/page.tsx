@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CalendarPlus, Car, Mail, MessageSquareText, Phone, Plus, Save, Trash2, Wrench } from "lucide-react";
+import { ArrowLeft, CalendarPlus, Car, FileText, Mail, MessageSquareText, Phone, Plus, Save, Trash2, Wrench } from "lucide-react";
 import {
   createServiceRecordAction,
   deleteServiceRecordAction,
   createVehicleAction,
   deleteCustomerAction,
+  generateQuoteFromMaintenanceAction,
+  generateQuoteFromServiceRecordAction,
   updateServiceRecordAction,
   updateCustomerAction
 } from "@/lib/actions";
@@ -46,6 +48,7 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
           },
           orderBy: { updatedAt: "desc" }
         },
+        quotes: { orderBy: { updatedAt: "desc" }, take: 12 },
       }
     }),
     prisma.reminderLog.findMany({
@@ -89,6 +92,9 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
   const openOpportunity = customer.vehicles
     .flatMap((vehicle) => vehicle.opportunities)
     .reduce((sum, opportunity) => sum + opportunity.estimatedRevenue, 0);
+  const pendingQuotes = customer.quotes.filter((quote) => quote.status === "DRAFT" || quote.status === "SENT");
+  const approvedQuotes = customer.quotes.filter((quote) => quote.status === "APPROVED");
+  const quoteOpportunity = pendingQuotes.reduce((sum, quote) => sum + quote.total, 0);
   const maintenancePotentialRevenue = maintenanceRows
     .filter((row) => row.prediction.status !== "Healthy")
     .reduce((sum, row) => sum + row.item.averagePrice, 0);
@@ -124,8 +130,8 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
       <section className="grid grid-4">
         <div className="card stat"><span className="muted">Customer score</span><strong>{customerScore}/100</strong><span className={`badge ${customerScore < 35 ? "danger" : customerScore < 60 ? "warn" : "ok"}`}>{scoreLabel(customerScore)}</span></div>
         <div className="card stat"><span className="muted">Lifetime spend</span><strong>{money.format(lifetimeSpend)}</strong><span className="badge">Recorded work</span></div>
-        <div className="card stat"><span className="muted">Open opportunity</span><strong>{money.format(openOpportunity)}</strong><span className="badge warn">Deferred</span></div>
-        <div className="card stat"><span className="muted">Booked revenue</span><strong>{money.format(bookedRevenue)}</strong><span className="badge">Scheduled</span></div>
+        <div className="card stat"><span className="muted">Open opportunity</span><strong>{money.format(openOpportunity + quoteOpportunity)}</strong><span className="badge warn">Deferred + quotes</span></div>
+        <div className="card stat"><span className="muted">Approved quotes</span><strong>{money.format(approvedQuotes.reduce((sum, quote) => sum + quote.total, 0))}</strong><span className="badge ok">{approvedQuotes.length} approved</span></div>
       </section>
       <section className="grid grid-4" style={{ marginTop: 16 }}>
         <div className="card stat"><span className="muted">Vehicles</span><strong>{customer.vehicles.length}</strong><span className="badge">Active profiles</span></div>
@@ -186,6 +192,12 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
                       <div className="mini-row"><span>Due soon</span><strong>{dueCount + dueSoonCount}</strong></div>
                       <div className="mini-row"><span>Vehicle health</span><strong>{vehicleScore}/100</strong></div>
                       <p>{healthyCount} healthy service{healthyCount === 1 ? "" : "s"} · {money.format(openVehicleOpportunity)} deferred opportunity</p>
+                      {vehicleRows.some((row) => row.prediction.status !== "Healthy") ? (
+                        <form action={generateQuoteFromMaintenanceAction}>
+                          {vehicleRows.filter((row) => row.prediction.status !== "Healthy").map((row) => <input key={row.item.id} type="hidden" name="maintenanceIds" value={row.item.id} />)}
+                          <button className="button" type="submit"><FileText /> Generate Quote</button>
+                        </form>
+                      ) : null}
                     </div>
                   </details>
                 );
@@ -235,13 +247,18 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
               {recentService.length ? recentService.map((record) => (
                 <details className="card detail-card" key={record.id}>
                   <summary>
-                  <div>
+                    <div>
                     <strong>{record.summary}</strong>
                     <p>{dateLabel(record.serviceDate)} · {record.vehicle.year} {record.vehicle.make} {record.vehicle.model} · {record.mileage.toLocaleString()} mi · {record.notes ?? "No notes"}</p>
                     {record.nextRecommendedService ? <p>Next: {record.nextRecommendedService}{record.nextRecommendedMileage ? ` at ${record.nextRecommendedMileage.toLocaleString()} mi` : ""}</p> : null}
                   </div>
                   <span className="badge">{money.format(record.revenue)}</span>
                   </summary>
+                  <form className="form" action={generateQuoteFromServiceRecordAction} style={{ marginTop: 12 }}>
+                    <input type="hidden" name="serviceRecordId" value={record.id} />
+                    <label>Estimated follow-up revenue<input name="estimatedRevenue" type="number" min={0} step="0.01" defaultValue={record.revenue || 120} /></label>
+                    <button className="button" type="submit"><FileText /> Generate Follow-Up Quote</button>
+                  </form>
                   <form className="form" action={updateServiceRecordAction} style={{ marginTop: 12 }}>
                     <input type="hidden" name="serviceRecordId" value={record.id} />
                     <div className="form-row">
@@ -348,6 +365,7 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
               <a className="button secondary" href={phoneHref(customer.phone, "sms")}><MessageSquareText /> Send SMS</a>
               <a className="button secondary" href={customer.email ? `mailto:${customer.email}` : "#"} aria-disabled={!customer.email}><Mail /> Send Email</a>
               <Link className="button" href="/app/calendar"><CalendarPlus /> Book Appointment</Link>
+              <Link className="button secondary" href="/app/quotes"><FileText /> Create Quote</Link>
             </div>
           </div>
 

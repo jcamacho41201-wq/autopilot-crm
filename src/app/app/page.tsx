@@ -38,7 +38,14 @@ export default async function DashboardPage() {
     .filter(({ prediction }) => prediction.shouldRemind || prediction.isOverdue)
     .sort((a, b) => a.prediction.dueDate.getTime() - b.prediction.dueDate.getTime())
     .slice(0, 8);
-  const upcoming = appointments.filter((appointment) => appointment.scheduledAt >= new Date()).slice(0, 6);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const todayAppointments = appointments.filter((appointment) => appointment.scheduledAt >= today && appointment.scheduledAt < tomorrow && appointment.status === "BOOKED");
+  const revenueToday = todayAppointments.reduce((sum, appointment) => sum + appointment.estimatedRevenue, 0);
+  const openMinutesToday = Math.max(0, 480 - todayAppointments.reduce((sum, appointment) => sum + appointment.durationMinutes, 0));
+  const upcoming = Array.from(new Map(appointments.filter((appointment) => appointment.scheduledAt >= new Date() && appointment.status === "BOOKED").map((appointment) => [appointment.id, appointment])).values()).slice(0, 6);
   const lowStock = inventory.filter((item) => item.quantityOnHand <= item.reorderThreshold);
   const calendarUtilization = utilization(appointments);
 
@@ -57,10 +64,16 @@ export default async function DashboardPage() {
       </header>
 
       <section className="grid grid-4">
-        <div className="card stat"><span className="muted">Potential next 30 days</span><strong>{money.format(forecast.potential30)}</strong><span className="badge ok">{forecast.due30.length} predicted jobs</span></div>
-        <div className="card stat"><span className="muted">Booked revenue</span><strong>{money.format(forecast.bookedRevenue)}</strong><span className="badge">Calendar confirmed</span></div>
-        <div className="card stat"><span className="muted">Deferred opportunity</span><strong>{money.format(forecast.deferredRevenue)}</strong><span className="badge warn">{opportunities.length} open</span></div>
+        <div className="card stat"><span className="muted">Cars scheduled today</span><strong>{todayAppointments.length}</strong><span className="badge">{money.format(revenueToday)} today</span></div>
+        <div className="card stat"><span className="muted">Open bays / capacity</span><strong>{openMinutesToday}</strong><span className="badge">open minutes today</span></div>
+        <div className="card stat"><span className="muted">Ready to remind</span><strong>{due.length}</strong><span className="badge warn">customers</span></div>
         <div className="card stat"><span className="muted">Calendar utilization</span><strong>{calendarUtilization}%</strong><span className="badge">Next 7 days</span></div>
+      </section>
+      <section className="grid grid-4" style={{ marginTop: 16 }}>
+        <div className="card stat"><span className="muted">Predicted 30 days</span><strong>{money.format(forecast.potential30)}</strong><span className="badge ok">{forecast.due30.length} jobs</span></div>
+        <div className="card stat"><span className="muted">Booked 30 days</span><strong>{money.format(forecast.bookedRevenue)}</strong><span className="badge">Calendar confirmed</span></div>
+        <div className="card stat"><span className="muted">Deferred opportunity</span><strong>{money.format(forecast.deferredRevenue)}</strong><span className="badge warn">{opportunities.length} open</span></div>
+        <div className="card stat"><span className="muted">Low inventory alerts</span><strong>{lowStock.length}</strong><span className="badge danger">below threshold</span></div>
       </section>
 
       <section className="split" style={{ marginTop: 16 }}>

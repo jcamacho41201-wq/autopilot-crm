@@ -55,6 +55,11 @@ export default async function NewCustomerPage() {
             <label>Model<input name="model" required placeholder="Camry" /></label>
           </div>
           <div className="form-row">
+            <label>Trim<input name="trim" placeholder="Sport, XLT, EX-L" /></label>
+            <label>VIN<input name="vin" /></label>
+          </div>
+          <label>License plate<input name="licensePlate" /></label>
+          <div className="form-row">
             <label>Mileage<input name="currentMileage" type="number" min={0} required placeholder="61000" /></label>
             <label>Estimated miles/year<input name="estimatedMilesYear" type="number" min={0} defaultValue={12000} /></label>
           </div>

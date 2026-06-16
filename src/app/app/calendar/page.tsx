@@ -1,5 +1,5 @@
 import { CalendarPlus, MoveRight } from "lucide-react";
-import { createAppointmentAction, moveAppointmentAction } from "@/lib/actions";
+import { createAppointmentAction, deleteAppointmentAction, moveAppointmentAction, updateAppointmentAction } from "@/lib/actions";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { dateLabel, dateTimeInputValue, money } from "@/lib/format";
@@ -52,11 +52,13 @@ export default async function CalendarPage() {
                     <span className="badge">{money.format(revenue)}</span>
                   </div>
                   <small className="muted">{Math.round((minutes / 480) * 100)}% capacity · {Math.max(0, 480 - minutes)} min open</small>
+                  <p className="eyebrow" style={{ marginTop: 8 }}>Daily Revenue: {money.format(revenue)}</p>
                   {dayAppointments.map((appointment) => (
                     <div className="appointment-chip" key={appointment.id}>
                       <strong>{appointment.scheduledAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</strong>
-                      <div>{appointment.serviceName}</div>
-                      <div>{appointment.customer.name} · {appointment.technician?.name ?? "Unassigned"}</div>
+                      <div>{appointment.serviceName} · {money.format(appointment.estimatedRevenue)}</div>
+                      <div>{appointment.customer.name} · {appointment.vehicle.year} {appointment.vehicle.make} {appointment.vehicle.model}</div>
+                      <div>{appointment.technician?.name ?? "Unassigned"} · {appointment.durationMinutes} min</div>
                     </div>
                   ))}
                 </div>
@@ -92,6 +94,34 @@ export default async function CalendarPage() {
             <label>Technician<select name="technicianId"><option value="">Unassigned</option>{technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label>
             <label>Status<select name="status"><option>BOOKED</option><option>COMPLETED</option><option>CANCELLED</option></select></label>
             <button className="button secondary" type="submit"><MoveRight /> Move</button>
+          </form>
+          <form className="panel form" action={updateAppointmentAction}>
+            <h2>Edit Appointment</h2>
+            <label>Appointment
+              <select name="id">
+                {appointments.map((appointment) => <option key={appointment.id} value={appointment.id}>{dateLabel(appointment.scheduledAt)} · {appointment.customer.name} · {appointment.serviceName}</option>)}
+              </select>
+            </label>
+            <label>Vehicle<select name="vehicleId">{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.customer.name} · {vehicle.make} {vehicle.model}</option>)}</select></label>
+            <label>Technician<select name="technicianId"><option value="">Unassigned</option>{technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label>
+            <label>When<input name="scheduledAt" type="datetime-local" defaultValue={dateTimeInputValue(new Date(Date.now() + 86400000))} /></label>
+            <div className="form-row">
+              <label>Minutes<input name="durationMinutes" type="number" min={15} defaultValue={60} /></label>
+              <label>Revenue<input name="estimatedRevenue" type="number" min={0} defaultValue={120} /></label>
+            </div>
+            <label>Status<select name="status"><option>BOOKED</option><option>COMPLETED</option><option>CANCELLED</option></select></label>
+            <label>Service<input name="serviceName" required placeholder="Oil change" /></label>
+            <label>Notes<textarea name="notes" /></label>
+            <button className="button secondary" type="submit">Save appointment</button>
+          </form>
+          <form className="panel form danger-zone" action={deleteAppointmentAction}>
+            <h2>Delete Appointment</h2>
+            <label>Appointment
+              <select name="id">
+                {appointments.map((appointment) => <option key={appointment.id} value={appointment.id}>{dateLabel(appointment.scheduledAt)} · {appointment.customer.name} · {appointment.serviceName}</option>)}
+              </select>
+            </label>
+            <button className="button danger-button" type="submit">Delete appointment</button>
           </form>
         </aside>
       </section>

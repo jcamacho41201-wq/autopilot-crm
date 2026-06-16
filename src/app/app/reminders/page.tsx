@@ -1,5 +1,5 @@
 import { Save, Send } from "lucide-react";
-import { sendMockReminderAction, updateReminderRuleAction } from "@/lib/actions";
+import { sendMockReminderAction, skipReminderAction, updateReminderRuleAction } from "@/lib/actions";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { maintenancePrediction, type MaintenanceWithVehicle } from "@/lib/predictions";
@@ -10,7 +10,7 @@ export default async function RemindersPage() {
   const [rules, maintenance, logs] = await Promise.all([
     prisma.reminderRule.findMany({ where: { shopId: user.shopId }, orderBy: { serviceName: "asc" } }),
     prisma.maintenanceItem.findMany({
-      where: { vehicle: { customer: { shopId: user.shopId } } },
+      where: { remindersEnabled: true, vehicle: { customer: { shopId: user.shopId } } },
       include: { vehicle: { include: { customer: true, mileageLogs: true } } }
     }),
     prisma.reminderLog.findMany({
@@ -28,9 +28,9 @@ export default async function RemindersPage() {
     <>
       <header className="topbar">
         <div>
-          <p className="eyebrow">Automation</p>
-          <h1>Reminder Rules</h1>
-          <p>Customize reminder thresholds and send mock booking-link texts until an SMS API key is configured.</p>
+          <p className="eyebrow">Customer outreach center</p>
+          <h1>Reminders</h1>
+          <p>See who is ready to contact, preview the booking-link message, send now, skip, or tune service-specific rules.</p>
         </div>
       </header>
       <section className="split">
@@ -38,19 +38,23 @@ export default async function RemindersPage() {
           <h2>Ready To Remind</h2>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Customer</th><th>Vehicle</th><th>Service</th><th>Due</th><th>Message</th><th></th></tr></thead>
+              <thead><tr><th>Customer</th><th>Vehicle</th><th>Service</th><th>Life / Due</th><th>Message preview</th><th>Actions</th></tr></thead>
               <tbody>
                 {due.map(({ item, prediction }) => (
                   <tr key={item.id}>
                     <td>{item.vehicle.customer.name}<br /><span className="muted">{item.vehicle.customer.phone}</span></td>
                     <td>{item.vehicle.year} {item.vehicle.make} {item.vehicle.model}</td>
-                    <td>{item.name}<br /><span className="badge">{prediction.remainingLifePercentage}% life</span></td>
-                    <td><span className={prediction.isOverdue ? "badge danger" : "badge warn"}>{prediction.isOverdue ? "Overdue" : dateLabel(prediction.dueDate)}</span></td>
+                    <td>{item.name}</td>
+                    <td><span className="badge">{prediction.remainingLifePercentage}% life</span><br /><span className={prediction.isOverdue ? "badge danger" : "badge warn"}>{prediction.isOverdue ? "Overdue" : dateLabel(prediction.dueDate)}</span></td>
                     <td>Hi {item.vehicle.customer.name}, your {item.vehicle.year} {item.vehicle.make} {item.vehicle.model} is approaching its next {item.name}. Book here: {user.shop.bookingLink}</td>
                     <td>
                       <form action={sendMockReminderAction}>
                         <input type="hidden" name="maintenanceId" value={item.id} />
                         <button className="icon-button" title="Send mock reminder" type="submit"><Send /></button>
+                      </form>
+                      <form action={skipReminderAction} style={{ marginTop: 8 }}>
+                        <input type="hidden" name="maintenanceId" value={item.id} />
+                        <button className="button ghost" type="submit">Skip</button>
                       </form>
                     </td>
                   </tr>
@@ -68,6 +72,7 @@ export default async function RemindersPage() {
                   <input type="hidden" name="id" value={rule.id} />
                   <label>Service<input name="serviceName" defaultValue={rule.serviceName} /></label>
                   <label>Threshold %<input name="thresholdPercentage" type="number" defaultValue={rule.thresholdPercentage} /></label>
+                  <label>Message template<textarea name="messageTemplate" defaultValue={rule.messageTemplate ?? "Hi {customer}, your {vehicle} is coming due for {service}. You can book here: {bookingLink}"} /></label>
                   <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} name="enabled" type="checkbox" defaultChecked={rule.enabled} /> Enabled</label>
                   <button className="button secondary" type="submit"><Save /> Save</button>
                 </form>

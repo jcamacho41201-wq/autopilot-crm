@@ -59,11 +59,13 @@ model Customer {
   email              String?
   notes              String?
   communicationPrefs String        @default("SMS")
+  lifetimeSpend      Float         @default(0)
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
   shop               Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
   vehicles           Vehicle[]
   appointments       Appointment[]
+  serviceRecords     ServiceRecord[]
 }
 
 model Vehicle {
@@ -72,11 +74,13 @@ model Vehicle {
   year                Int
   make                String
   model               String
+  trim                String?
   vehicleType         String?
   vin                 String?
   licensePlate        String?
   notes               String?
   currentMileage      Int
+  mileageUpdatedAt    DateTime?
   estimatedMilesYear  Int                   @default(12000)
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
@@ -122,6 +126,7 @@ model MaintenanceItem {
   status                     String          @default("ACTIVE")
   overrideDueMileage         Int?
   overrideDueDate            DateTime?
+  remindersEnabled           Boolean         @default(true)
   reminderThresholdPercentage Int             @default(20)
   customNotes                String?
   vehicle                    Vehicle         @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
@@ -154,7 +159,9 @@ model Appointment {
 model ServiceRecord {
   id             String                @id @default(cuid())
   shopId         String
+  customerId     String?
   vehicleId      String
+  technicianId   String?
   serviceDate    DateTime              @default(now())
   mileage        Int
   summary        String
@@ -164,7 +171,9 @@ model ServiceRecord {
   nextRecommendedMileage Int?
   createdAt      DateTime              @default(now())
   shop           Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  customer       Customer?             @relation(fields: [customerId], references: [id], onDelete: SetNull)
   vehicle        Vehicle               @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  technician     Technician?           @relation(fields: [technicianId], references: [id], onDelete: SetNull)
   opportunities  DeferredOpportunity[]
   scanLogs       InventoryScanLog[]
 }
@@ -176,12 +185,15 @@ model ReminderRule {
   thresholdPercentage Int
   sendOverdue         Boolean @default(true)
   enabled             Boolean @default(true)
+  messageTemplate     String?
   shop                Shop    @relation(fields: [shopId], references: [id], onDelete: Cascade)
 }
 
 model ReminderLog {
   id                String          @id @default(cuid())
   maintenanceItemId String
+  customerId        String?
+  vehicleId         String?
   customerName      String
   phone             String
   message           String
@@ -245,6 +257,9 @@ model Technician {
   standardHours Float        @default(0)
   actualHours   Float        @default(0)
   jobsCompleted Int          @default(0)
+  hourlyRate    Float        @default(0)
+  reworkCount   Int          @default(0)
   shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
   appointments Appointment[]
+  serviceRecords ServiceRecord[]
 }

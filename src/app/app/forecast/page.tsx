@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/auth";
+import { sendMockReminderAction } from "@/lib/actions";
 import { prisma } from "@/lib/prisma";
 import { calculateForecast, type MaintenanceWithVehicle } from "@/lib/predictions";
 import { dateLabel, money } from "@/lib/format";
@@ -18,6 +19,10 @@ export default async function ForecastPage() {
     })
   ]);
   const forecast = calculateForecast({ maintenance: maintenance as MaintenanceWithVehicle[], appointments, opportunities });
+  const topPredicted = forecast.predicted
+    .filter(({ prediction }) => prediction.shouldRemind || prediction.isOverdue)
+    .sort((a, b) => b.item.averagePrice - a.item.averagePrice)
+    .slice(0, 8);
   const serviceGroups = forecast.due30.reduce<Record<string, { count: number; revenue: number }>>((acc, row) => {
     acc[row.item.name] ??= { count: 0, revenue: 0 };
     acc[row.item.name].count += 1;
@@ -35,10 +40,16 @@ export default async function ForecastPage() {
         </div>
       </header>
       <section className="grid grid-4">
-        <div className="card stat"><span className="muted">30 days</span><strong>{money.format(forecast.potential30)}</strong></div>
-        <div className="card stat"><span className="muted">60 days</span><strong>{money.format(forecast.potential60)}</strong></div>
-        <div className="card stat"><span className="muted">90 days</span><strong>{money.format(forecast.potential90)}</strong></div>
-        <div className="card stat"><span className="muted">Total with deferred</span><strong>{money.format(forecast.potential90 + forecast.deferredRevenue + forecast.bookedRevenue)}</strong></div>
+        <div className="card stat"><span className="muted">Scheduled revenue</span><strong>{money.format(forecast.bookedRevenue)}</strong></div>
+        <div className="card stat"><span className="muted">Predicted maintenance</span><strong>{money.format(forecast.potential30)}</strong></div>
+        <div className="card stat"><span className="muted">Overdue revenue</span><strong>{money.format(forecast.overdueRevenue)}</strong></div>
+        <div className="card stat"><span className="muted">Total opportunity</span><strong>{money.format(forecast.potential90 + forecast.deferredRevenue + forecast.bookedRevenue)}</strong></div>
+      </section>
+      <section className="grid grid-4" style={{ marginTop: 16 }}>
+        <div className="card stat"><span className="muted">Next 30 days</span><strong>{money.format(forecast.potential30)}</strong></div>
+        <div className="card stat"><span className="muted">Next 60 days</span><strong>{money.format(forecast.potential60)}</strong></div>
+        <div className="card stat"><span className="muted">Next 90 days</span><strong>{money.format(forecast.potential90)}</strong></div>
+        <div className="card stat"><span className="muted">Deferred work</span><strong>{money.format(forecast.deferredRevenue)}</strong></div>
       </section>
       <section className="split" style={{ marginTop: 16 }}>
         <div className="panel">
@@ -60,12 +71,22 @@ export default async function ForecastPage() {
           </div>
         </div>
         <aside className="panel">
-          <h2>Open Opportunities</h2>
+          <h2>Top Opportunities</h2>
           <div className="list">
-            {opportunities.filter((opportunity) => opportunity.status === "OPEN").map((opportunity) => (
+            {topPredicted.map(({ item, prediction }) => (
+              <div className="card" key={item.id}>
+                <div className="row"><strong>{item.vehicle.customer.name}</strong><span className="badge warn">{money.format(item.averagePrice)}</span></div>
+                <p>{item.vehicle.year} {item.vehicle.make} {item.vehicle.model} · {item.name} · due {dateLabel(prediction.dueDate)}</p>
+                <form action={sendMockReminderAction}>
+                  <input type="hidden" name="maintenanceId" value={item.id} />
+                  <button className="button secondary" type="submit">Send reminder</button>
+                </form>
+              </div>
+            ))}
+            {opportunities.filter((opportunity) => opportunity.status === "OPEN").slice(0, 4).map((opportunity) => (
               <div className="card" key={opportunity.id}>
-                <div className="row"><strong>{opportunity.description}</strong><span className="badge warn">{money.format(opportunity.estimatedRevenue)}</span></div>
-                <p>{opportunity.vehicle.customer.name} · Follow up {dateLabel(opportunity.followUpDate)}</p>
+                <div className="row"><strong>{opportunity.vehicle.customer.name}</strong><span className="badge warn">{money.format(opportunity.estimatedRevenue)}</span></div>
+                <p>{opportunity.vehicle.year} {opportunity.vehicle.make} {opportunity.vehicle.model} · {opportunity.description} · follow up {dateLabel(opportunity.followUpDate)}</p>
               </div>
             ))}
           </div>

@@ -72,6 +72,7 @@ model Vehicle {
   year                Int
   make                String
   model               String
+  vehicleType         String?
   vin                 String?
   licensePlate        String?
   currentMileage      Int

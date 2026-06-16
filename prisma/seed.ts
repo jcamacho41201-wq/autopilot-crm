@@ -143,9 +143,9 @@ async function main() {
   });
 
   const vehicles = [
-    { customerId: john.id, year: 2019, make: "Toyota", model: "Camry", vin: "4T1B11HK8KU000001", licensePlate: "JHN-219", currentMileage: 61000, estimatedMilesYear: 10000, logs: [[166, 56000], [14, 61000]] },
-    { customerId: maria.id, year: 2021, make: "Ford", model: "Transit", vin: "1FTBW2CM1MKA00001", licensePlate: "MGA-421", currentMileage: 82500, estimatedMilesYear: 21500, logs: [[210, 70000], [40, 80000], [5, 82500]] },
-    { customerId: eli.id, year: 2017, make: "Honda", model: "CR-V", vin: "2HKRW2H82HH000001", licensePlate: "ELI-337", currentMileage: 94200, estimatedMilesYear: 12000, logs: [[350, 82600], [90, 91500], [8, 94200]] }
+    { customerId: john.id, year: 2019, make: "Toyota", model: "Camry", vehicleType: "Sedan", vin: "4T1B11HK8KU000001", licensePlate: "JHN-219", currentMileage: 61000, estimatedMilesYear: 10000, logs: [[166, 56000], [14, 61000]] },
+    { customerId: maria.id, year: 2021, make: "Ford", model: "Transit", vehicleType: "Van", vin: "1FTBW2CM1MKA00001", licensePlate: "MGA-421", currentMileage: 82500, estimatedMilesYear: 21500, logs: [[210, 70000], [40, 80000], [5, 82500]] },
+    { customerId: eli.id, year: 2017, make: "Honda", model: "CR-V", vehicleType: "SUV", vin: "2HKRW2H82HH000001", licensePlate: "ELI-337", currentMileage: 94200, estimatedMilesYear: 12000, logs: [[350, 82600], [90, 91500], [8, 94200]] }
   ];
 
   for (const vehicleData of vehicles) {
@@ -155,6 +155,7 @@ async function main() {
         year: vehicleData.year,
         make: vehicleData.make,
         model: vehicleData.model,
+        vehicleType: vehicleData.vehicleType,
         vin: vehicleData.vin,
         licensePlate: vehicleData.licensePlate,
         currentMileage: vehicleData.currentMileage,

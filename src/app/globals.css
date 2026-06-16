@@ -216,6 +216,11 @@ p {
   background: #fff2e2;
 }
 
+.badge.due {
+  color: #b45309;
+  background: #ffedd5;
+}
+
 .badge.danger {
   color: var(--danger);
   background: #ffe9e7;
@@ -248,6 +253,11 @@ p {
 .button.secondary {
   color: var(--ink);
   background: var(--surface-2);
+}
+
+.button[aria-disabled="true"] {
+  opacity: 0.55;
+  pointer-events: none;
 }
 
 .button.ghost {

@@ -35,7 +35,7 @@ export function projectedMileage(vehicle: VehicleWithLearning, asOf = new Date()
   const latest = [...vehicle.mileageLogs].sort((a, b) => b.loggedAt.getTime() - a.loggedAt.getTime())[0];
   if (!latest) return vehicle.currentMileage;
   const elapsedDays = Math.max(0, (asOf.getTime() - latest.loggedAt.getTime()) / MS_PER_DAY);
-  return Math.round(latest.mileage + (annualMiles / 365) * elapsedDays);
+  return Math.max(vehicle.currentMileage, Math.round(latest.mileage + (annualMiles / 365) * elapsedDays));
 }
 
 export function addMonths(date: Date, months: number) {
@@ -53,9 +53,9 @@ export function maintenancePrediction(item: MaintenanceWithVehicle, asOf = new D
   const milesPerDay = annualMiles / 365;
   const currentMileage = projectedMileage(item.vehicle, asOf);
   const dueMileage = item.overrideDueMileage ?? item.lastCompletedMileage + item.mileageInterval;
-  const mileageRange = Math.max(1, dueMileage - item.lastCompletedMileage);
-  const milesRemaining = dueMileage - currentMileage;
-  const mileageRemainingPct = Math.max(0, Math.min(100, (milesRemaining / mileageRange) * 100));
+  const mileageInterval = Math.max(1, item.overrideDueMileage ? dueMileage - item.lastCompletedMileage : item.mileageInterval);
+  const milesUsed = Math.max(0, currentMileage - item.lastCompletedMileage);
+  const mileageRemainingPct = Math.max(0, Math.min(100, 100 - (milesUsed / mileageInterval) * 100));
 
   const dueByTime = item.overrideDueDate ?? addMonths(item.lastCompletedDate, item.timeIntervalMonths);
   const totalTimeDays = Math.max(1, daysBetween(item.lastCompletedDate, dueByTime));
@@ -66,7 +66,15 @@ export function maintenancePrediction(item: MaintenanceWithVehicle, asOf = new D
   const dueByMileage = new Date(asOf.getTime() + daysUntilMileageDue * MS_PER_DAY);
   const dueDate = dueByMileage < dueByTime ? dueByMileage : dueByTime;
   const remainingLifePercentage = Math.round(Math.min(mileageRemainingPct, timeRemainingPct));
-  const isOverdue = dueDate <= asOf || remainingLifePercentage <= 0;
+  const isOverdue = dueMileage <= currentMileage || dueDate <= asOf || remainingLifePercentage <= 0;
+  const status = isOverdue
+    ? "Overdue"
+    : remainingLifePercentage <= item.reminderThresholdPercentage
+      ? "Due"
+      : remainingLifePercentage <= 50
+        ? "Due Soon"
+        : "Healthy";
+  const statusTone = status === "Overdue" ? "danger" : status === "Due" ? "due" : status === "Due Soon" ? "warn" : "ok";
   const shouldRemind = remainingLifePercentage <= item.reminderThresholdPercentage;
 
   return {
@@ -74,9 +82,12 @@ export function maintenancePrediction(item: MaintenanceWithVehicle, asOf = new D
     currentMileage,
     dueMileage,
     dueDate,
+    milesUsed,
     remainingLifePercentage,
     mileageRemainingPct: Math.round(mileageRemainingPct),
     timeRemainingPct: Math.round(timeRemainingPct),
+    status,
+    statusTone,
     isOverdue,
     shouldRemind
   };

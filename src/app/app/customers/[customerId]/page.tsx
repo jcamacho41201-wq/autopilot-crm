@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Car, Mail, Phone, Plus, Save, Trash2, Wrench } from "lucide-react";
+import { ArrowLeft, CalendarPlus, Car, Mail, MessageSquareText, Phone, Plus, Save, Trash2, Wrench } from "lucide-react";
 import {
   createServiceRecordAction,
   deleteServiceRecordAction,
@@ -23,22 +23,39 @@ function scoreLabel(score: number) {
   return "Inactive";
 }
 
+function clampScore(value: number, max: number) {
+  return Math.max(0, Math.min(max, Math.round(value)));
+}
+
+function phoneHref(value: string, scheme: "tel" | "sms") {
+  const digits = value.replace(/[^\d+]/g, "");
+  return `${scheme}:${digits || value}`;
+}
+
 export default async function CustomerDashboardPage({ params, searchParams }: { params: { customerId: string }; searchParams: { error?: string } }) {
   const user = await requireUser();
-  const customer = await prisma.customer.findFirst({
-    where: { id: params.customerId, shopId: user.shopId },
-    include: {
-      vehicles: {
-        include: {
-          mileageLogs: { orderBy: { loggedAt: "desc" } },
-          maintenanceItems: true,
-          serviceRecords: { orderBy: { serviceDate: "desc" }, take: 8 },
-          appointments: { where: { status: "BOOKED" }, orderBy: { scheduledAt: "asc" }, take: 4 }
+  const [customer, reminderLogs] = await Promise.all([
+    prisma.customer.findFirst({
+      where: { id: params.customerId, shopId: user.shopId },
+      include: {
+        vehicles: {
+          include: {
+            mileageLogs: { orderBy: { loggedAt: "desc" } },
+            maintenanceItems: true,
+            serviceRecords: { orderBy: { serviceDate: "desc" }, take: 8 },
+            appointments: { orderBy: { scheduledAt: "asc" }, take: 12 },
+            opportunities: { where: { status: "OPEN" } }
+          },
+          orderBy: { updatedAt: "desc" }
         },
-        orderBy: { updatedAt: "desc" }
       }
-    }
-  });
+    }),
+    prisma.reminderLog.findMany({
+      where: { customerId: params.customerId },
+      orderBy: { sentAt: "desc" },
+      take: 25
+    })
+  ]);
   if (!customer) notFound();
 
   const maintenanceRows = customer.vehicles
@@ -57,9 +74,6 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
     )
     .sort((a, b) => a.prediction.remainingLifePercentage - b.prediction.remainingLifePercentage);
 
-  const customerScore = maintenanceRows.length
-    ? Math.round(maintenanceRows.reduce((sum, row) => sum + row.prediction.remainingLifePercentage, 0) / maintenanceRows.length)
-    : 100;
   const recentService = customer.vehicles.flatMap((vehicle) =>
     vehicle.serviceRecords.map((record) => ({ ...record, vehicle }))
   ).sort((a, b) => b.serviceDate.getTime() - a.serviceDate.getTime()).slice(0, 8);
@@ -69,10 +83,30 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
   const lastVisit = recentService[0]?.serviceDate;
   const nextAppointment = customer.vehicles
     .flatMap((vehicle) => vehicle.appointments.map((appointment) => ({ ...appointment, vehicle })))
+    .filter((appointment) => appointment.status === "BOOKED" && appointment.scheduledAt >= new Date())
     .sort((a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime())[0];
-  const highPriority = maintenanceRows.filter((row) => row.prediction.remainingLifePercentage < 20);
-  const mediumPriority = maintenanceRows.filter((row) => row.prediction.remainingLifePercentage >= 20 && row.prediction.remainingLifePercentage <= 50);
-  const lowPriority = maintenanceRows.filter((row) => row.prediction.remainingLifePercentage > 50 && row.prediction.remainingLifePercentage <= 80);
+  const allAppointments = customer.vehicles.flatMap((vehicle) => vehicle.appointments);
+  const bookedRevenue = allAppointments
+    .filter((appointment) => appointment.status === "BOOKED" && appointment.scheduledAt >= new Date())
+    .reduce((sum, appointment) => sum + appointment.estimatedRevenue, 0);
+  const openOpportunity = customer.vehicles
+    .flatMap((vehicle) => vehicle.opportunities)
+    .reduce((sum, opportunity) => sum + opportunity.estimatedRevenue, 0);
+  const forecastRevenue = openMaintenance.reduce((sum, row) => sum + row.item.averagePrice, 0);
+  const completedAppointments = allAppointments.filter((appointment) => appointment.status === "COMPLETED").length;
+  const missedAppointments = allAppointments.filter((appointment) => appointment.status === "CANCELLED").length;
+  const appointmentAttendanceFactor = allAppointments.length
+    ? clampScore((completedAppointments / Math.max(1, completedAppointments + missedAppointments)) * 20 || 12, 20)
+    : 12;
+  const lifetimeSpendFactor = clampScore((lifetimeSpend / 3000) * 25, 25);
+  const reminderResponseFactor = reminderLogs.length
+    ? clampScore((reminderLogs.filter((log) => log.status === "SENT" || log.status === "MOCK_SENT").length / reminderLogs.length) * 18, 18)
+    : 10;
+  const serviceFrequencyFactor = clampScore(recentService.length * 5.8, 29);
+  const customerScore = lifetimeSpendFactor + appointmentAttendanceFactor + reminderResponseFactor + serviceFrequencyFactor;
+  const highPriority = maintenanceRows.filter((row) => row.prediction.status === "Overdue" || row.prediction.status === "Due");
+  const mediumPriority = maintenanceRows.filter((row) => row.prediction.status === "Due Soon");
+  const lowPriority = maintenanceRows.filter((row) => row.prediction.status === "Healthy" && row.prediction.remainingLifePercentage <= 80);
 
   return (
     <>
@@ -88,9 +122,15 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
 
       <section className="grid grid-4">
         <div className="card stat"><span className="muted">Customer score</span><strong>{customerScore}/100</strong><span className={`badge ${customerScore < 35 ? "danger" : customerScore < 60 ? "warn" : "ok"}`}>{scoreLabel(customerScore)}</span></div>
-        <div className="card stat"><span className="muted">Vehicles</span><strong>{customer.vehicles.length}</strong><span className="badge">Active profiles</span></div>
         <div className="card stat"><span className="muted">Lifetime spend</span><strong>{money.format(lifetimeSpend)}</strong><span className="badge">Recorded work</span></div>
-        <div className="card stat"><span className="muted">Opportunity value</span><strong>{money.format(openMaintenance.reduce((sum, row) => sum + row.item.averagePrice, 0))}</strong><span className="badge warn">{openMaintenance.length} due</span></div>
+        <div className="card stat"><span className="muted">Open opportunity</span><strong>{money.format(openOpportunity)}</strong><span className="badge warn">Deferred</span></div>
+        <div className="card stat"><span className="muted">Booked revenue</span><strong>{money.format(bookedRevenue)}</strong><span className="badge">Scheduled</span></div>
+      </section>
+      <section className="grid grid-4" style={{ marginTop: 16 }}>
+        <div className="card stat"><span className="muted">Forecast revenue</span><strong>{money.format(forecastRevenue)}</strong><span className="badge warn">{openMaintenance.length} predicted</span></div>
+        <div className="card stat"><span className="muted">Lifetime spend</span><strong>+{lifetimeSpendFactor}</strong><span className="badge">Score factor</span></div>
+        <div className="card stat"><span className="muted">Attendance</span><strong>+{appointmentAttendanceFactor}</strong><span className="badge">Score factor</span></div>
+        <div className="card stat"><span className="muted">Reminder response</span><strong>+{reminderResponseFactor}</strong><span className="badge">Score factor</span></div>
       </section>
 
       <section className="split" style={{ marginTop: 16 }}>
@@ -98,12 +138,20 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
           <div className="panel">
             <h2>Vehicles</h2>
             <div className="grid grid-2">
-              {customer.vehicles.map((vehicle) => {
+              {customer.vehicles.length ? customer.vehicles.map((vehicle) => {
                 const annualMiles = estimateAnnualMiles({ ...vehicle, mileageLogs: vehicle.mileageLogs });
                 const vehicleRows = maintenanceRows.filter((row) => row.vehicle.id === vehicle.id);
                 const vehicleScore = vehicleRows.length
                   ? Math.round(vehicleRows.reduce((sum, row) => sum + row.prediction.remainingLifePercentage, 0) / vehicleRows.length)
                   : 100;
+                const overdueCount = vehicleRows.filter((row) => row.prediction.status === "Overdue").length;
+                const dueCount = vehicleRows.filter((row) => row.prediction.status === "Due").length;
+                const dueSoonCount = vehicleRows.filter((row) => row.prediction.status === "Due Soon").length;
+                const healthyCount = vehicleRows.filter((row) => row.prediction.status === "Healthy").length;
+                const potentialRevenue = vehicleRows
+                  .filter((row) => row.prediction.status !== "Healthy")
+                  .reduce((sum, row) => sum + row.item.averagePrice, 0);
+                const openVehicleOpportunity = vehicle.opportunities.reduce((sum, opportunity) => sum + opportunity.estimatedRevenue, 0);
                 return (
                   <details className="card detail-card" key={vehicle.id}>
                     <summary>
@@ -114,13 +162,33 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
                       </div>
                       <span className={`badge ${vehicleScore < 35 ? "danger" : vehicleScore < 60 ? "warn" : "ok"}`}>{vehicleScore}/100</span>
                     </summary>
-                    <div className="list" style={{ marginTop: 12 }}>
-                      {vehicleRows.slice(0, 4).map(({ item, prediction }) => (
-                        <div className="mini-row" key={item.id}>
-                          <span>{item.name}</span>
-                          <span className={prediction.isOverdue ? "badge danger" : prediction.shouldRemind ? "badge warn" : "badge ok"}>{prediction.remainingLifePercentage}% life · due {prediction.dueMileage.toLocaleString()} mi</span>
-                        </div>
-                      ))}
+                    <div className="grid grid-4" style={{ marginTop: 12 }}>
+                      <div className="card stat"><span className="muted">Vehicle Health Score</span><strong>{vehicleScore}/100</strong><span className="badge">{healthyCount} healthy</span></div>
+                      <div className="card stat"><span className="muted">Potential Revenue</span><strong>{money.format(potentialRevenue)}</strong><span className="badge warn">{dueSoonCount} due soon</span></div>
+                      <div className="card stat"><span className="muted">Open Opportunities</span><strong>{money.format(openVehicleOpportunity)}</strong><span className="badge">Deferred</span></div>
+                      <div className="card stat"><span className="muted">Due Services</span><strong>{overdueCount + dueCount}</strong><span className="badge danger">{overdueCount} overdue</span></div>
+                    </div>
+                    <details className="inline-details" style={{ marginTop: 12 }}>
+                      <summary className="button ghost">View Details</summary>
+                      <div className="list" style={{ marginTop: 12 }}>
+                        <div className="mini-row"><span>Vehicle Summary</span><strong>{dueSoonCount} due soon · {overdueCount} overdue · {healthyCount} healthy · {money.format(potentialRevenue)} potential</strong></div>
+                        {vehicleRows.length ? vehicleRows.map(({ item, prediction }) => (
+                          <div className="mini-row" key={item.id}>
+                            <span>
+                              {item.name}
+                              <small>Last {item.lastCompletedMileage.toLocaleString()} mi · current {prediction.currentMileage.toLocaleString()} mi · used {prediction.milesUsed.toLocaleString()} mi</small>
+                            </span>
+                            <span className={`badge ${prediction.statusTone}`}>{prediction.status} · {prediction.remainingLifePercentage}% life · due {prediction.dueMileage.toLocaleString()} mi</span>
+                          </div>
+                        )) : <p>No maintenance items yet.</p>}
+                      </div>
+                    </details>
+                    <div className="card" style={{ marginTop: 12 }}>
+                      <strong>Vehicle Health Factors</strong>
+                      <p>
+                        Overdue: {overdueCount}. Due: {dueCount}. Due soon: {dueSoonCount}. Healthy: {healthyCount}.
+                        Score is the average remaining life across tracked services.
+                      </p>
                     </div>
                     <form className="form" action={updateVehicleAction} style={{ marginTop: 14 }}>
                       <input type="hidden" name="vehicleId" value={vehicle.id} />
@@ -154,7 +222,7 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
                     </form>
                   </details>
                 );
-              })}
+              }) : <p>No vehicles yet. Add the first vehicle to start tracking service life.</p>}
             </div>
           </div>
 
@@ -189,9 +257,9 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
             <h2>Upcoming Maintenance / Service Life</h2>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Vehicle</th><th>Service</th><th>Life</th><th>Due</th><th>Value</th></tr></thead>
+                <thead><tr><th>Vehicle</th><th>Service</th><th>Life</th><th>Mileage</th><th>Status</th><th>Value</th></tr></thead>
                 <tbody>
-                  {maintenanceRows.slice(0, 10).map(({ vehicle, item, prediction }) => (
+                  {maintenanceRows.length ? maintenanceRows.slice(0, 10).map(({ vehicle, item, prediction }) => (
                     <tr key={item.id}>
                       <td>{vehicle.year} {vehicle.make} {vehicle.model}</td>
                       <td><strong>{item.name}</strong></td>
@@ -199,10 +267,17 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
                         <div className="progress"><span style={{ width: `${prediction.remainingLifePercentage}%` }} /></div>
                         <small>{prediction.remainingLifePercentage}% remaining</small>
                       </td>
-                      <td><span className={prediction.isOverdue ? "badge danger" : prediction.shouldRemind ? "badge warn" : "badge ok"}>{prediction.isOverdue ? "Overdue" : dateLabel(prediction.dueDate)}</span></td>
+                      <td>
+                        <small>Current {prediction.currentMileage.toLocaleString()} mi</small><br />
+                        <small>Last {item.lastCompletedMileage.toLocaleString()} mi</small><br />
+                        <small>Due {prediction.dueMileage.toLocaleString()} mi</small>
+                      </td>
+                      <td><span className={`badge ${prediction.statusTone}`}>{prediction.status}</span><br /><small>{dateLabel(prediction.dueDate)}</small></td>
                       <td>{money.format(item.averagePrice)}</td>
                     </tr>
-                  ))}
+                  )) : (
+                    <tr><td colSpan={6}>No maintenance items yet.</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -251,7 +326,7 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
 
           <div className="panel">
             <h2>Create Service Record</h2>
-            <form className="form" action={createServiceRecordAction}>
+            {customer.vehicles.length ? <form className="form" action={createServiceRecordAction}>
               <input type="hidden" name="returnTo" value={customerPath} />
               <label>Vehicle
                 <select name="vehicleId" required>
@@ -276,7 +351,7 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
               </div>
               <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="confirmLowerMileage" /> Confirm lower mileage</label>
               <button className="button" type="submit"><Wrench /> Add service record</button>
-            </form>
+            </form> : <p>Add a vehicle before creating service records.</p>}
           </div>
         </div>
 
@@ -321,9 +396,19 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
           </div>
 
           <div className="panel">
+            <h2>Action Center</h2>
+            <div className="grid grid-2">
+              <a className="button secondary" href={phoneHref(customer.phone, "tel")}><Phone /> Call</a>
+              <a className="button secondary" href={phoneHref(customer.phone, "sms")}><MessageSquareText /> Send SMS</a>
+              <a className="button secondary" href={customer.email ? `mailto:${customer.email}` : "#"} aria-disabled={!customer.email}><Mail /> Send Email</a>
+              <Link className="button" href="/app/calendar"><CalendarPlus /> Book Appointment</Link>
+            </div>
+          </div>
+
+          <div className="panel">
             <h2>Driving Profile</h2>
             <div className="list">
-              {customer.vehicles.map((vehicle) => {
+              {customer.vehicles.length ? customer.vehicles.map((vehicle) => {
                 const annualMiles = estimateAnnualMiles({ ...vehicle, mileageLogs: vehicle.mileageLogs });
                 const dailyMiles = Math.round(annualMiles / 365);
                 const accuracy = vehicle.mileageLogs.length >= 3 ? "High" : vehicle.mileageLogs.length >= 2 ? "Medium" : "Default";
@@ -335,7 +420,18 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
                     <div className="mini-row"><span>Mileage history</span><strong>{vehicle.mileageLogs.slice(0, 4).map((log) => log.mileage.toLocaleString()).join(" / ") || "None"}</strong></div>
                   </div>
                 );
-              })}
+              }) : <p>No driving profile yet.</p>}
+            </div>
+          </div>
+
+          <div className="panel">
+            <h2>Customer Score</h2>
+            <div className="list">
+              <div className="mini-row"><span>Lifetime spend</span><strong>+{lifetimeSpendFactor}/25</strong></div>
+              <div className="mini-row"><span>Appointment attendance</span><strong>+{appointmentAttendanceFactor}/20</strong></div>
+              <div className="mini-row"><span>Reminder response</span><strong>+{reminderResponseFactor}/18</strong></div>
+              <div className="mini-row"><span>Service frequency</span><strong>+{serviceFrequencyFactor}/29</strong></div>
+              <div className="mini-row"><span>Vehicle count</span><strong>{customer.vehicles.length}</strong></div>
             </div>
           </div>
 

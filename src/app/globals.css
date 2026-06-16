@@ -622,6 +622,164 @@ textarea {
   min-width: 260px;
 }
 
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.dashboard-wide {
+  min-width: 0;
+}
+
+.dashboard-attention-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.dashboard-attention-card summary {
+  align-items: flex-start;
+}
+
+.chart-card {
+  margin-top: 14px;
+}
+
+.revenue-chart {
+  width: 100%;
+  min-height: 280px;
+  background: #f7f7fa;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.revenue-chart line {
+  stroke: var(--line);
+  stroke-width: 2;
+}
+
+.revenue-chart polyline {
+  fill: none;
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.revenue-chart .total {
+  stroke: var(--brand);
+}
+
+.revenue-chart .booked {
+  stroke: var(--ok);
+}
+
+.revenue-chart .predicted {
+  stroke: var(--warn);
+  stroke-dasharray: 8 8;
+}
+
+.revenue-chart text {
+  fill: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.chart-legend i {
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.legend-total {
+  background: var(--brand);
+}
+
+.legend-booked {
+  background: var(--ok);
+}
+
+.legend-predicted {
+  background: var(--warn);
+}
+
+.bar-row {
+  display: grid;
+  gap: 8px;
+}
+
+.bar-track {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.bar-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand);
+}
+
+.bar-track.ok span {
+  background: var(--ok);
+}
+
+.bar-track.warn span {
+  background: var(--warn);
+}
+
+.bar-track.danger span {
+  background: var(--danger);
+}
+
+.capacity-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.capacity-day {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface);
+}
+
+.capacity-day p {
+  margin: 8px 0 0;
+  font-size: 0.86rem;
+}
+
+.empty-state {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
 .modal-details[open]::before {
   content: "";
   position: fixed;
@@ -713,6 +871,7 @@ textarea {
   .grid-5,
   .grid-3,
   .grid-2,
+  .dashboard-grid,
   .split {
     grid-template-columns: 1fr;
   }

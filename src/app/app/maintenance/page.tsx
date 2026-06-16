@@ -19,6 +19,12 @@ function nextAppointmentTime() {
   return date;
 }
 
+function severityIndicator(status: string) {
+  if (status === "Overdue") return "🔴";
+  if (status === "Due" || status === "Due Soon") return "🟡";
+  return "🟢";
+}
+
 export default async function MaintenancePage({ searchParams }: { searchParams: { error?: string } }) {
   const user = await requireUser();
   const [vehicles, maintenance] = await Promise.all([
@@ -63,6 +69,11 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
           <div className="list">
             {queue.cards.length ? queue.cards.map((card) => {
               const highest = card.highestPriority;
+              const cardSeverity = card.overdueCount
+                ? "🔴 overdue"
+                : card.dueCount + card.dueSoonCount
+                  ? "🟡 due soon"
+                  : "🟢 healthy";
               return (
                 <details className="vehicle-queue-card" key={card.vehicle.id}>
                   <summary>
@@ -79,6 +90,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                       </div>
                     </div>
                     <div className="queue-summary">
+                      <span className={`badge ${card.overdueCount ? "danger" : card.dueCount + card.dueSoonCount ? "warn" : "ok"}`}>{cardSeverity}</span>
                       <span className="badge warn">{money.format(card.potentialRevenue)} potential</span>
                       <span className={`badge ${card.healthScore < 35 ? "danger" : card.healthScore < 60 ? "warn" : "ok"}`}>{card.healthScore}/100 health</span>
                       <span className="badge danger">{card.overdueCount} overdue</span>
@@ -99,7 +111,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                         {card.rows.map(({ item, prediction }) => (
                           <tr key={item.id}>
                             <td><strong>{item.name}</strong><br /><span className="muted">{item.status}</span></td>
-                            <td><span className={`badge ${prediction.statusTone}`}>{prediction.status}</span></td>
+                            <td><span className={`badge ${prediction.statusTone}`}>{severityIndicator(prediction.status)} {prediction.status}</span></td>
                             <td>{dateLabel(prediction.dueDate)}</td>
                             <td>{prediction.dueMileage.toLocaleString()} mi</td>
                             <td>{money.format(item.averagePrice)}</td>

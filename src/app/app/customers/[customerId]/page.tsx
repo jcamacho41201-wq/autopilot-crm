@@ -7,9 +7,7 @@ import {
   createVehicleAction,
   deleteCustomerAction,
   updateServiceRecordAction,
-  deleteVehicleAction,
-  updateCustomerAction,
-  updateVehicleAction
+  updateCustomerAction
 } from "@/lib/actions";
 import { requireUser } from "@/lib/auth";
 import { dateLabel, money, yyyyMmDd } from "@/lib/format";
@@ -189,31 +187,6 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
                       <div className="mini-row"><span>Vehicle health</span><strong>{vehicleScore}/100</strong></div>
                       <p>{healthyCount} healthy service{healthyCount === 1 ? "" : "s"} · {money.format(openVehicleOpportunity)} deferred opportunity</p>
                     </div>
-                    <form className="form" action={updateVehicleAction} style={{ marginTop: 14 }}>
-                      <input type="hidden" name="vehicleId" value={vehicle.id} />
-                      <input type="hidden" name="returnTo" value={customerPath} />
-                      <div className="form-row">
-                        <label>Year<input name="year" type="number" defaultValue={vehicle.year} required /></label>
-                        <label>Type<input name="vehicleType" defaultValue={vehicle.vehicleType ?? ""} placeholder="SUV" /></label>
-                      </div>
-                      <div className="form-row">
-                        <label>Make<input name="make" defaultValue={vehicle.make} required /></label>
-                        <label>Model<input name="model" defaultValue={vehicle.model} required /></label>
-                      </div>
-                      <label>Trim<input name="trim" defaultValue={vehicle.trim ?? ""} /></label>
-                      <div className="form-row">
-                        <label>VIN<input name="vin" defaultValue={vehicle.vin ?? ""} /></label>
-                        <label>Plate<input name="licensePlate" defaultValue={vehicle.licensePlate ?? ""} /></label>
-                      </div>
-                      <label>Vehicle notes<textarea name="notes" defaultValue={vehicle.notes ?? ""} /></label>
-                      <button className="button secondary" type="submit"><Save /> Save vehicle</button>
-                    </form>
-                    <form className="form danger-zone" action={deleteVehicleAction}>
-                      <input type="hidden" name="vehicleId" value={vehicle.id} />
-                      <input type="hidden" name="returnTo" value={customerPath} />
-                      <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="confirmDelete" /> Delete this vehicle and its service history</label>
-                      <button className="button danger-button" type="submit"><Trash2 /> Delete vehicle</button>
-                    </form>
                   </details>
                 );
               }) : <p>No vehicles yet. Add the first vehicle to start tracking service life.</p>}
@@ -221,30 +194,39 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
           </div>
 
           <div className="panel">
-            <h2>Add Vehicle</h2>
-            <form className="form" action={createVehicleAction}>
-              <input type="hidden" name="customerId" value={customer.id} />
-              <input type="hidden" name="returnTo" value={customerPath} />
-              <div className="form-row">
-                <label>Year<input name="year" type="number" required /></label>
-                <label>Type<input name="vehicleType" placeholder="Truck" /></label>
+            <div className="row">
+              <div>
+                <h2>Vehicle Profiles</h2>
               </div>
-              <div className="form-row">
-                <label>Make<input name="make" required /></label>
-                <label>Model<input name="model" required /></label>
-              </div>
-              <label>Trim<input name="trim" /></label>
-              <div className="form-row">
-                <label>Mileage<input name="currentMileage" type="number" min={0} required /></label>
-                <label>Driving profile<input name="estimatedMilesYear" type="number" min={0} defaultValue={12000} /></label>
-              </div>
-              <div className="form-row">
-                <label>VIN<input name="vin" /></label>
-                <label>Plate<input name="licensePlate" /></label>
-              </div>
-              <label>Vehicle notes<textarea name="notes" /></label>
-              <button className="button" type="submit"><Plus /> Add vehicle</button>
-            </form>
+              <details className="inline-details modal-details">
+                <summary className="button"><Plus /> Add Vehicle</summary>
+                <div className="modal-panel">
+                  <form className="form" action={createVehicleAction}>
+                    <input type="hidden" name="customerId" value={customer.id} />
+                    <input type="hidden" name="returnTo" value={customerPath} />
+                    <div className="form-row">
+                      <label>Year<input name="year" type="number" required /></label>
+                      <label>Type<input name="vehicleType" placeholder="Truck" /></label>
+                    </div>
+                    <div className="form-row">
+                      <label>Make<input name="make" required /></label>
+                      <label>Model<input name="model" required /></label>
+                    </div>
+                    <label>Trim<input name="trim" /></label>
+                    <div className="form-row">
+                      <label>Mileage<input name="currentMileage" type="number" min={0} required /></label>
+                      <label>Driving profile<input name="estimatedMilesYear" type="number" min={0} defaultValue={12000} /></label>
+                    </div>
+                    <div className="form-row">
+                      <label>VIN<input name="vin" /></label>
+                      <label>Plate<input name="licensePlate" /></label>
+                    </div>
+                    <label>Vehicle notes<textarea name="notes" /></label>
+                    <button className="button" type="submit"><Plus /> Add vehicle</button>
+                  </form>
+                </div>
+              </details>
+            </div>
           </div>
 
           <div className="panel">

@@ -6,6 +6,7 @@ import {
   createAppointmentAction,
   createServiceRecordAction,
   deleteMileageLogAction,
+  deleteVehicleAction,
   flagMileageCorrectionAction,
   sendMockReminderAction,
   updateMileageLogAction,
@@ -358,6 +359,15 @@ export default async function VehicleDashboardPage({
             </div>
             <label>Vehicle notes<textarea name="notes" defaultValue={vehicle.notes ?? ""} /></label>
             <button className="button secondary" type="submit"><Save /> Save vehicle</button>
+          </form>
+
+          <form className="panel form danger-zone" action={deleteVehicleAction}>
+            <h2>Delete Vehicle</h2>
+            <input type="hidden" name="vehicleId" value={vehicle.id} />
+            <input type="hidden" name="returnTo" value={`/app/customers/${vehicle.customerId}`} />
+            <p>Deleting this vehicle also deletes its mileage readings, service history, maintenance items, appointments, and opportunities.</p>
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="confirmDelete" /> I understand and want to delete this vehicle</label>
+            <button className="button danger-button" type="submit"><Trash2 /> Delete vehicle</button>
           </form>
 
           <div className="panel">

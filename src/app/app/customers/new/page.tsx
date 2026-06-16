@@ -55,8 +55,8 @@ export default async function NewCustomerPage() {
             <label>Model<input name="model" required placeholder="Camry" /></label>
           </div>
           <div className="form-row">
-            <label>Mileage<input name="currentMileage" type="number" required placeholder="61000" /></label>
-            <label>Estimated miles/year<input name="estimatedMilesYear" type="number" defaultValue={12000} /></label>
+            <label>Mileage<input name="currentMileage" type="number" min={0} required placeholder="61000" /></label>
+            <label>Estimated miles/year<input name="estimatedMilesYear" type="number" min={0} defaultValue={12000} /></label>
           </div>
           <label>Notes<textarea name="notes" placeholder="Preferences, concerns, declined work, or follow-up context" /></label>
           <button className="button" type="submit"><UserPlus /> Create customer</button>

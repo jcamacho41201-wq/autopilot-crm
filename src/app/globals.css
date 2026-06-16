@@ -256,6 +256,12 @@ p {
   border: 1px solid var(--line);
 }
 
+.button.danger-button,
+.danger-button {
+  background: var(--danger);
+  color: white;
+}
+
 .text-link {
   color: var(--brand);
   font-weight: 800;
@@ -501,6 +507,45 @@ textarea {
 
 .vehicle-queue-card[open] summary::after {
   content: "-";
+}
+
+.detail-card summary,
+.inline-details summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.detail-card summary::-webkit-details-marker,
+.inline-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.detail-card summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.detail-card h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.inline-details {
+  margin-bottom: 10px;
+}
+
+.inline-details summary {
+  width: fit-content;
+  margin-bottom: 10px;
+}
+
+.danger-zone {
+  border-top: 1px solid #ffd0cc;
+  margin-top: 12px;
+  padding-top: 12px;
 }
 
 .queue-summary,

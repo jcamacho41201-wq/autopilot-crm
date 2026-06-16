@@ -52,11 +52,12 @@ export function maintenancePrediction(item: MaintenanceWithVehicle, asOf = new D
   const annualMiles = estimateAnnualMiles(item.vehicle);
   const milesPerDay = annualMiles / 365;
   const currentMileage = projectedMileage(item.vehicle, asOf);
-  const dueMileage = item.lastCompletedMileage + item.mileageInterval;
-  const milesUsed = Math.max(0, currentMileage - item.lastCompletedMileage);
-  const mileageRemainingPct = Math.max(0, Math.min(100, ((item.mileageInterval - milesUsed) / item.mileageInterval) * 100));
+  const dueMileage = item.overrideDueMileage ?? item.lastCompletedMileage + item.mileageInterval;
+  const mileageRange = Math.max(1, dueMileage - item.lastCompletedMileage);
+  const milesRemaining = dueMileage - currentMileage;
+  const mileageRemainingPct = Math.max(0, Math.min(100, (milesRemaining / mileageRange) * 100));
 
-  const dueByTime = addMonths(item.lastCompletedDate, item.timeIntervalMonths);
+  const dueByTime = item.overrideDueDate ?? addMonths(item.lastCompletedDate, item.timeIntervalMonths);
   const totalTimeDays = Math.max(1, daysBetween(item.lastCompletedDate, dueByTime));
   const elapsedTimeDays = Math.max(0, daysBetween(item.lastCompletedDate, asOf));
   const timeRemainingPct = Math.max(0, Math.min(100, ((totalTimeDays - elapsedTimeDays) / totalTimeDays) * 100));

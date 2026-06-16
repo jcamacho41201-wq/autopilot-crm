@@ -75,6 +75,7 @@ model Vehicle {
   vehicleType         String?
   vin                 String?
   licensePlate        String?
+  notes               String?
   currentMileage      Int
   estimatedMilesYear  Int                   @default(12000)
   createdAt           DateTime              @default(now())
@@ -118,6 +119,9 @@ model MaintenanceItem {
   mileageInterval            Int
   timeIntervalMonths         Int
   averagePrice               Float
+  status                     String          @default("ACTIVE")
+  overrideDueMileage         Int?
+  overrideDueDate            DateTime?
   reminderThresholdPercentage Int             @default(20)
   customNotes                String?
   vehicle                    Vehicle         @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
@@ -154,7 +158,10 @@ model ServiceRecord {
   serviceDate    DateTime              @default(now())
   mileage        Int
   summary        String
+  notes          String?
   revenue        Float                 @default(0)
+  nextRecommendedService String?
+  nextRecommendedMileage Int?
   createdAt      DateTime              @default(now())
   shop           Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
   vehicle        Vehicle               @relation(fields: [vehicleId], references: [id], onDelete: Cascade)

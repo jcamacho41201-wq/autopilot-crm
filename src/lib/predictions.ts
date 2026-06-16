@@ -13,7 +13,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 export type VehicleWithLearning = Vehicle & { mileageLogs: MileageLog[] };
 export type MaintenanceWithVehicle = MaintenanceItem & {
   vehicle: VehicleWithLearning & {
-    customer: { name: string; phone: string; email: string | null };
+    customer: { id: string; name: string; phone: string; email: string | null };
   };
 };
 
@@ -110,11 +110,12 @@ export function calculateForecast(params: {
   maintenance: MaintenanceWithVehicle[];
   appointments: Appointment[];
   opportunities: DeferredOpportunity[];
+  predicted?: { item: MaintenanceWithVehicle; prediction: ReturnType<typeof maintenancePrediction> }[];
   asOf?: Date;
 }) {
   const asOf = params.asOf ?? new Date();
   const horizon = (days: number) => new Date(asOf.getTime() + days * MS_PER_DAY);
-  const predicted = params.maintenance.map((item) => ({
+  const predicted = params.predicted ?? params.maintenance.map((item) => ({
     item,
     prediction: maintenancePrediction(item, asOf)
   }));

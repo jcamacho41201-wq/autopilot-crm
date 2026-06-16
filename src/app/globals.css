@@ -169,6 +169,10 @@ p {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.grid-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .panel,
 .card {
   background: var(--surface);
@@ -559,11 +563,16 @@ textarea {
 }
 
 .queue-summary,
-.queue-preview {
+.queue-preview,
+.queue-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+
+.queue-actions {
+  margin-top: 8px;
 }
 
 .queue-preview {
@@ -591,6 +600,7 @@ textarea {
   }
 
   .grid-4,
+  .grid-5,
   .grid-3,
   .grid-2,
   .split {

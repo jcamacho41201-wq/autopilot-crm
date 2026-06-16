@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { sendMockReminderAction } from "@/lib/actions";
 import { prisma } from "@/lib/prisma";
+import { buildMaintenanceQueue, type MaintenanceQueueSource } from "@/lib/maintenanceQueue";
 import { calculateForecast, type MaintenanceWithVehicle } from "@/lib/predictions";
 import { dateLabel, money } from "@/lib/format";
 
@@ -18,9 +19,14 @@ export default async function ForecastPage() {
       orderBy: { followUpDate: "asc" }
     })
   ]);
-  const forecast = calculateForecast({ maintenance: maintenance as MaintenanceWithVehicle[], appointments, opportunities });
-  const topPredicted = forecast.predicted
-    .filter(({ prediction }) => prediction.shouldRemind || prediction.isOverdue)
+  const queue = buildMaintenanceQueue(maintenance as MaintenanceQueueSource[]);
+  const forecast = calculateForecast({
+    maintenance: maintenance as MaintenanceWithVehicle[],
+    predicted: queue.rows,
+    appointments,
+    opportunities
+  });
+  const topPredicted = queue.opportunityRows
     .sort((a, b) => b.item.averagePrice - a.item.averagePrice)
     .slice(0, 8);
   const serviceGroups = forecast.due30.reduce<Record<string, { count: number; revenue: number }>>((acc, row) => {
@@ -41,15 +47,15 @@ export default async function ForecastPage() {
       </header>
       <section className="grid grid-4">
         <div className="card stat"><span className="muted">Scheduled revenue</span><strong>{money.format(forecast.bookedRevenue)}</strong></div>
-        <div className="card stat"><span className="muted">Predicted maintenance</span><strong>{money.format(forecast.potential30)}</strong></div>
-        <div className="card stat"><span className="muted">Overdue revenue</span><strong>{money.format(forecast.overdueRevenue)}</strong></div>
+        <div className="card stat"><span className="muted">Maintenance queue</span><strong>{money.format(queue.kpis.openOpportunities)}</strong></div>
+        <div className="card stat"><span className="muted">Overdue revenue</span><strong>{money.format(queue.kpis.overdueRevenue)}</strong></div>
         <div className="card stat"><span className="muted">Total opportunity</span><strong>{money.format(forecast.potential90 + forecast.deferredRevenue + forecast.bookedRevenue)}</strong></div>
       </section>
       <section className="grid grid-4" style={{ marginTop: 16 }}>
         <div className="card stat"><span className="muted">Next 30 days</span><strong>{money.format(forecast.potential30)}</strong></div>
         <div className="card stat"><span className="muted">Next 60 days</span><strong>{money.format(forecast.potential60)}</strong></div>
         <div className="card stat"><span className="muted">Next 90 days</span><strong>{money.format(forecast.potential90)}</strong></div>
-        <div className="card stat"><span className="muted">Deferred work</span><strong>{money.format(forecast.deferredRevenue)}</strong></div>
+        <div className="card stat"><span className="muted">Open deferred work</span><strong>{money.format(forecast.deferredRevenue)}</strong></div>
       </section>
       <section className="split" style={{ marginTop: 16 }}>
         <div className="panel">

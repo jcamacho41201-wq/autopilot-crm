@@ -77,7 +77,6 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
   const recentService = customer.vehicles.flatMap((vehicle) =>
     vehicle.serviceRecords.map((record) => ({ ...record, vehicle }))
   ).sort((a, b) => b.serviceDate.getTime() - a.serviceDate.getTime()).slice(0, 8);
-  const openMaintenance = maintenanceRows.filter((row) => row.prediction.shouldRemind || row.prediction.isOverdue).slice(0, 8);
   const customerPath = `/app/customers/${customer.id}`;
   const lifetimeSpend = customer.lifetimeSpend || recentService.reduce((sum, record) => sum + record.revenue, 0);
   const lastVisit = recentService[0]?.serviceDate;
@@ -92,7 +91,14 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
   const openOpportunity = customer.vehicles
     .flatMap((vehicle) => vehicle.opportunities)
     .reduce((sum, opportunity) => sum + opportunity.estimatedRevenue, 0);
-  const forecastRevenue = openMaintenance.reduce((sum, row) => sum + row.item.averagePrice, 0);
+  const maintenancePotentialRevenue = maintenanceRows
+    .filter((row) => row.prediction.status !== "Healthy")
+    .reduce((sum, row) => sum + row.item.averagePrice, 0);
+  const overdueMaintenanceCount = maintenanceRows.filter((row) => row.prediction.status === "Overdue").length;
+  const dueSoonMaintenanceCount = maintenanceRows.filter((row) => row.prediction.status === "Due" || row.prediction.status === "Due Soon").length;
+  const vehicleHealthScore = maintenanceRows.length
+    ? Math.round(maintenanceRows.reduce((sum, row) => sum + row.prediction.remainingLifePercentage, 0) / maintenanceRows.length)
+    : 100;
   const completedAppointments = allAppointments.filter((appointment) => appointment.status === "COMPLETED").length;
   const missedAppointments = allAppointments.filter((appointment) => appointment.status === "CANCELLED").length;
   const appointmentAttendanceFactor = allAppointments.length
@@ -104,9 +110,6 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
     : 10;
   const serviceFrequencyFactor = clampScore(recentService.length * 5.8, 29);
   const customerScore = lifetimeSpendFactor + appointmentAttendanceFactor + reminderResponseFactor + serviceFrequencyFactor;
-  const highPriority = maintenanceRows.filter((row) => row.prediction.status === "Overdue" || row.prediction.status === "Due");
-  const mediumPriority = maintenanceRows.filter((row) => row.prediction.status === "Due Soon");
-  const lowPriority = maintenanceRows.filter((row) => row.prediction.status === "Healthy" && row.prediction.remainingLifePercentage <= 80);
 
   return (
     <>
@@ -127,10 +130,22 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
         <div className="card stat"><span className="muted">Booked revenue</span><strong>{money.format(bookedRevenue)}</strong><span className="badge">Scheduled</span></div>
       </section>
       <section className="grid grid-4" style={{ marginTop: 16 }}>
-        <div className="card stat"><span className="muted">Forecast revenue</span><strong>{money.format(forecastRevenue)}</strong><span className="badge warn">{openMaintenance.length} predicted</span></div>
+        <div className="card stat"><span className="muted">Vehicles</span><strong>{customer.vehicles.length}</strong><span className="badge">Active profiles</span></div>
         <div className="card stat"><span className="muted">Lifetime spend</span><strong>+{lifetimeSpendFactor}</strong><span className="badge">Score factor</span></div>
         <div className="card stat"><span className="muted">Attendance</span><strong>+{appointmentAttendanceFactor}</strong><span className="badge">Score factor</span></div>
         <div className="card stat"><span className="muted">Reminder response</span><strong>+{reminderResponseFactor}</strong><span className="badge">Score factor</span></div>
+      </section>
+      <section className="panel" style={{ marginTop: 16 }}>
+        <div className="row">
+          <h2>Maintenance Summary</h2>
+          <Link className="button secondary" href="/app/maintenance">View Maintenance Queue</Link>
+        </div>
+        <div className="grid grid-4" style={{ marginTop: 12 }}>
+          <div className="card stat"><span className="muted">Potential Revenue</span><strong>{money.format(maintenancePotentialRevenue)}</strong></div>
+          <div className="card stat"><span className="muted">Overdue</span><strong>{overdueMaintenanceCount}</strong><span className="badge danger">Past due</span></div>
+          <div className="card stat"><span className="muted">Due Soon</span><strong>{dueSoonMaintenanceCount}</strong><span className="badge warn">Upcoming</span></div>
+          <div className="card stat"><span className="muted">Vehicle Health</span><strong>{vehicleHealthScore}/100</strong><span className={`badge ${vehicleHealthScore < 35 ? "danger" : vehicleHealthScore < 60 ? "warn" : "ok"}`}>Profile</span></div>
+        </div>
       </section>
 
       <section className="split" style={{ marginTop: 16 }}>
@@ -153,7 +168,7 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
                   .reduce((sum, row) => sum + row.item.averagePrice, 0);
                 const openVehicleOpportunity = vehicle.opportunities.reduce((sum, opportunity) => sum + opportunity.estimatedRevenue, 0);
                 return (
-                  <details className="card detail-card" key={vehicle.id}>
+                  <details className="card detail-card" id={`vehicle-${vehicle.id}`} key={vehicle.id}>
                     <summary>
                       <div>
                         <h3><Car size={17} /> {vehicle.year} {vehicle.make} {vehicle.model}</h3>
@@ -162,33 +177,16 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
                       </div>
                       <span className={`badge ${vehicleScore < 35 ? "danger" : vehicleScore < 60 ? "warn" : "ok"}`}>{vehicleScore}/100</span>
                     </summary>
-                    <div className="grid grid-4" style={{ marginTop: 12 }}>
-                      <div className="card stat"><span className="muted">Vehicle Health Score</span><strong>{vehicleScore}/100</strong><span className="badge">{healthyCount} healthy</span></div>
-                      <div className="card stat"><span className="muted">Potential Revenue</span><strong>{money.format(potentialRevenue)}</strong><span className="badge warn">{dueSoonCount} due soon</span></div>
-                      <div className="card stat"><span className="muted">Open Opportunities</span><strong>{money.format(openVehicleOpportunity)}</strong><span className="badge">Deferred</span></div>
-                      <div className="card stat"><span className="muted">Due Services</span><strong>{overdueCount + dueCount}</strong><span className="badge danger">{overdueCount} overdue</span></div>
-                    </div>
-                    <details className="inline-details" style={{ marginTop: 12 }}>
-                      <summary className="button ghost">View Details</summary>
-                      <div className="list" style={{ marginTop: 12 }}>
-                        <div className="mini-row"><span>Vehicle Summary</span><strong>{dueSoonCount} due soon · {overdueCount} overdue · {healthyCount} healthy · {money.format(potentialRevenue)} potential</strong></div>
-                        {vehicleRows.length ? vehicleRows.map(({ item, prediction }) => (
-                          <div className="mini-row" key={item.id}>
-                            <span>
-                              {item.name}
-                              <small>Last {item.lastCompletedMileage.toLocaleString()} mi · current {prediction.currentMileage.toLocaleString()} mi · used {prediction.milesUsed.toLocaleString()} mi</small>
-                            </span>
-                            <span className={`badge ${prediction.statusTone}`}>{prediction.status} · {prediction.remainingLifePercentage}% life · due {prediction.dueMileage.toLocaleString()} mi</span>
-                          </div>
-                        )) : <p>No maintenance items yet.</p>}
-                      </div>
-                    </details>
                     <div className="card" style={{ marginTop: 12 }}>
-                      <strong>Vehicle Health Factors</strong>
-                      <p>
-                        Overdue: {overdueCount}. Due: {dueCount}. Due soon: {dueSoonCount}. Healthy: {healthyCount}.
-                        Score is the average remaining life across tracked services.
-                      </p>
+                      <div className="row">
+                        <strong>Maintenance Summary</strong>
+                        <Link className="button secondary" href="/app/maintenance">View Maintenance Queue</Link>
+                      </div>
+                      <div className="mini-row"><span>Potential revenue</span><strong>{money.format(potentialRevenue)}</strong></div>
+                      <div className="mini-row"><span>Overdue</span><strong>{overdueCount}</strong></div>
+                      <div className="mini-row"><span>Due soon</span><strong>{dueCount + dueSoonCount}</strong></div>
+                      <div className="mini-row"><span>Vehicle health</span><strong>{vehicleScore}/100</strong></div>
+                      <p>{healthyCount} healthy service{healthyCount === 1 ? "" : "s"} · {money.format(openVehicleOpportunity)} deferred opportunity</p>
                     </div>
                     <form className="form" action={updateVehicleAction} style={{ marginTop: 14 }}>
                       <input type="hidden" name="vehicleId" value={vehicle.id} />
@@ -251,36 +249,6 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
               <label>Vehicle notes<textarea name="notes" /></label>
               <button className="button" type="submit"><Plus /> Add vehicle</button>
             </form>
-          </div>
-
-          <div className="panel">
-            <h2>Upcoming Maintenance / Service Life</h2>
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Vehicle</th><th>Service</th><th>Life</th><th>Mileage</th><th>Status</th><th>Value</th></tr></thead>
-                <tbody>
-                  {maintenanceRows.length ? maintenanceRows.slice(0, 10).map(({ vehicle, item, prediction }) => (
-                    <tr key={item.id}>
-                      <td>{vehicle.year} {vehicle.make} {vehicle.model}</td>
-                      <td><strong>{item.name}</strong></td>
-                      <td>
-                        <div className="progress"><span style={{ width: `${prediction.remainingLifePercentage}%` }} /></div>
-                        <small>{prediction.remainingLifePercentage}% remaining</small>
-                      </td>
-                      <td>
-                        <small>Current {prediction.currentMileage.toLocaleString()} mi</small><br />
-                        <small>Last {item.lastCompletedMileage.toLocaleString()} mi</small><br />
-                        <small>Due {prediction.dueMileage.toLocaleString()} mi</small>
-                      </td>
-                      <td><span className={`badge ${prediction.statusTone}`}>{prediction.status}</span><br /><small>{dateLabel(prediction.dueDate)}</small></td>
-                      <td>{money.format(item.averagePrice)}</td>
-                    </tr>
-                  )) : (
-                    <tr><td colSpan={6}>No maintenance items yet.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
           </div>
 
           <div className="panel">
@@ -435,16 +403,6 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
             </div>
           </div>
 
-          <div className="panel">
-            <h2>AI Service Advisor</h2>
-            <p>Rule-based recommendations by service life.</p>
-            <div className="list">
-              <div className="card"><strong>High Priority</strong><p>{highPriority.map((row) => row.item.name).join(", ") || "No high-priority work"}</p></div>
-              <div className="card"><strong>Medium Priority</strong><p>{mediumPriority.map((row) => row.item.name).join(", ") || "No medium-priority work"}</p></div>
-              <div className="card"><strong>Low Priority</strong><p>{lowPriority.map((row) => row.item.name).join(", ") || "No low-priority work"}</p></div>
-              <div className="card row"><strong>Potential Revenue</strong><span className="badge warn">{money.format([...highPriority, ...mediumPriority, ...lowPriority].reduce((sum, row) => sum + row.item.averagePrice, 0))}</span></div>
-            </div>
-          </div>
         </aside>
       </section>
     </>

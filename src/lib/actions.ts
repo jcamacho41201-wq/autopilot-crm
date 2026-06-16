@@ -683,6 +683,8 @@ export async function createAppointmentAction(formData: FormData) {
   const user = await requireUser();
   await createAppointmentForShop(user.shopId, formData);
   revalidatePath("/app/calendar");
+  revalidatePath("/app/maintenance");
+  revalidatePath("/app/forecast");
   revalidatePath("/app");
 }
 
@@ -892,6 +894,7 @@ export async function sendMockReminderAction(formData: FormData) {
       status: process.env.SMS_API_KEY ? "SENT" : "MOCK_SENT"
     }
   });
+  revalidatePath("/app/maintenance");
   revalidatePath("/app/reminders");
 }
 

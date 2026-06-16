@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createSession, currentUser, hashPassword, requireUser, signOut, verifyPassword } from "@/lib/auth";
+import { databaseErrorMessage, isDatabaseError } from "@/lib/db-errors";
 import { prisma } from "@/lib/prisma";
 import { maintenancePrediction, type MaintenanceWithVehicle } from "@/lib/predictions";
 
@@ -115,11 +116,18 @@ async function recordMileage(params: {
 export async function loginAction(formData: FormData) {
   const email = stringValue(formData, "email").toLowerCase();
   const password = stringValue(formData, "password");
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user || !(await verifyPassword(password, user.passwordHash))) {
-    redirect("/login?error=Invalid%20email%20or%20password");
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !(await verifyPassword(password, user.passwordHash))) {
+      redirect("/login?error=Invalid%20email%20or%20password");
+    }
+    await createSession(user.id);
+  } catch (error) {
+    if (isDatabaseError(error)) {
+      redirect(`/login?error=${encodeURIComponent(databaseErrorMessage(error))}`);
+    }
+    throw error;
   }
-  await createSession(user.id);
   redirect("/app");
 }
 

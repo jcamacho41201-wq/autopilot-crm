@@ -12,7 +12,7 @@ export default function LoginPage({ searchParams }: { searchParams: { error?: st
         </Link>
         <h1 style={{ fontSize: "2rem", marginTop: 24 }}>Log in</h1>
         <p>Use `owner@autopilot.local` and `password123` after seeding the demo database.</p>
-        {searchParams.error ? <p className="badge danger">{searchParams.error}</p> : null}
+        {searchParams.error ? <p className="badge danger" style={{ whiteSpace: "normal" }}>{searchParams.error}</p> : null}
         <form className="form" action={loginAction}>
           <label>Email<input name="email" type="email" defaultValue="owner@autopilot.local" required /></label>
           <label>Password<input name="password" type="password" defaultValue="password123" required /></label>

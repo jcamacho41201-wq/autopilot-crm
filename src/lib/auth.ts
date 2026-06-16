@@ -64,12 +64,17 @@ export async function signOut() {
 export async function currentUser() {
   const token = cookies().get(SESSION_COOKIE)?.value;
   if (!token) return null;
-  const session = await prisma.session.findUnique({
-    where: { tokenHash: hash(token) },
-    include: { user: { include: { shop: true } } }
-  });
-  if (!session || session.expiresAt < new Date()) return null;
-  return session.user;
+  try {
+    const session = await prisma.session.findUnique({
+      where: { tokenHash: hash(token) },
+      include: { user: { include: { shop: true } } }
+    });
+    if (!session || session.expiresAt < new Date()) return null;
+    return session.user;
+  } catch (error) {
+    console.error("Failed to load current user session", error);
+    return null;
+  }
 }
 
 export async function requireUser() {

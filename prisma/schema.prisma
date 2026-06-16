@@ -1,0 +1,242 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Shop {
+  id                 String              @id @default(cuid())
+  name               String
+  slug               String              @unique
+  plan               String              @default("Starter")
+  subscriptionStatus String              @default("trialing")
+  bookingLink        String              @default("")
+  timezone           String              @default("America/New_York")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  users              User[]
+  customers          Customer[]
+  appointments       Appointment[]
+  inventoryItems     InventoryItem[]
+  reminderRules      ReminderRule[]
+  services           Service[]
+  technicians        Technician[]
+  scanLogs           InventoryScanLog[]
+  serviceRecords     ServiceRecord[]
+  opportunities      DeferredOpportunity[]
+}
+
+model User {
+  id           String    @id @default(cuid())
+  shopId       String
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         String    @default("MECHANIC")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  shop         Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  sessions     Session[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Customer {
+  id                 String        @id @default(cuid())
+  shopId             String
+  name               String
+  phone              String
+  email              String?
+  notes              String?
+  communicationPrefs String        @default("SMS")
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  shop               Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  vehicles           Vehicle[]
+  appointments       Appointment[]
+}
+
+model Vehicle {
+  id                  String                @id @default(cuid())
+  customerId          String
+  year                Int
+  make                String
+  model               String
+  vin                 String?
+  licensePlate        String?
+  currentMileage      Int
+  estimatedMilesYear  Int                   @default(12000)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  customer            Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  mileageLogs         MileageLog[]
+  maintenanceItems    MaintenanceItem[]
+  serviceRecords      ServiceRecord[]
+  appointments        Appointment[]
+  opportunities       DeferredOpportunity[]
+}
+
+model MileageLog {
+  id        String   @id @default(cuid())
+  vehicleId String
+  mileage   Int
+  loggedAt  DateTime @default(now())
+  source    String   @default("service")
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+}
+
+model Service {
+  id                    String            @id @default(cuid())
+  shopId                String
+  name                  String
+  defaultMileageInterval Int
+  defaultTimeIntervalMonths Int
+  averagePrice          Float
+  defaultReminderThreshold Int             @default(20)
+  shop                  Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  maintenanceItems      MaintenanceItem[]
+}
+
+model MaintenanceItem {
+  id                         String          @id @default(cuid())
+  vehicleId                  String
+  serviceId                  String?
+  name                       String
+  lastCompletedDate          DateTime
+  lastCompletedMileage       Int
+  mileageInterval            Int
+  timeIntervalMonths         Int
+  averagePrice               Float
+  reminderThresholdPercentage Int             @default(20)
+  customNotes                String?
+  vehicle                    Vehicle         @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  service                    Service?        @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  reminders                  ReminderLog[]
+}
+
+model Appointment {
+  id                 String            @id @default(cuid())
+  shopId             String
+  customerId         String
+  vehicleId          String
+  technicianId       String?
+  scheduledAt        DateTime
+  durationMinutes    Int               @default(60)
+  status             String            @default("BOOKED")
+  serviceName        String
+  estimatedRevenue   Float             @default(0)
+  estimatedJobHours  Float             @default(1)
+  actualJobHours     Float?
+  notes              String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  shop               Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  customer           Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  vehicle            Vehicle           @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  technician         Technician?       @relation(fields: [technicianId], references: [id], onDelete: SetNull)
+}
+
+model ServiceRecord {
+  id             String                @id @default(cuid())
+  shopId         String
+  vehicleId      String
+  serviceDate    DateTime              @default(now())
+  mileage        Int
+  summary        String
+  revenue        Float                 @default(0)
+  createdAt      DateTime              @default(now())
+  shop           Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  vehicle        Vehicle               @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  opportunities  DeferredOpportunity[]
+  scanLogs       InventoryScanLog[]
+}
+
+model ReminderRule {
+  id                  String  @id @default(cuid())
+  shopId              String
+  serviceName         String
+  thresholdPercentage Int
+  sendOverdue         Boolean @default(true)
+  enabled             Boolean @default(true)
+  shop                Shop    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model ReminderLog {
+  id                String          @id @default(cuid())
+  maintenanceItemId String
+  customerName      String
+  phone             String
+  message           String
+  status            String          @default("MOCK_SENT")
+  sentAt            DateTime        @default(now())
+  maintenanceItem   MaintenanceItem @relation(fields: [maintenanceItemId], references: [id], onDelete: Cascade)
+}
+
+model InventoryItem {
+  id               String             @id @default(cuid())
+  shopId           String
+  sku              String
+  barcode          String             @unique
+  name             String
+  category         String
+  quantityOnHand   Float
+  unitType         String
+  reorderThreshold Float
+  cost             Float
+  supplier         String
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  shop             Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  scanLogs         InventoryScanLog[]
+}
+
+model InventoryScanLog {
+  id              String          @id @default(cuid())
+  shopId          String
+  inventoryItemId String
+  serviceRecordId String?
+  quantityUsed    Float
+  barcode         String
+  scannedBy       String
+  scannedAt       DateTime        @default(now())
+  shop            Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  inventoryItem   InventoryItem   @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  serviceRecord   ServiceRecord?  @relation(fields: [serviceRecordId], references: [id], onDelete: SetNull)
+}
+
+model DeferredOpportunity {
+  id              String            @id @default(cuid())
+  shopId          String
+  vehicleId       String
+  serviceRecordId String?
+  description     String
+  estimatedRevenue Float
+  followUpDate    DateTime
+  status          String            @default("OPEN")
+  createdAt       DateTime          @default(now())
+  shop            Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  vehicle         Vehicle           @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  serviceRecord   ServiceRecord?    @relation(fields: [serviceRecordId], references: [id], onDelete: SetNull)
+}
+
+model Technician {
+  id           String        @id @default(cuid())
+  shopId       String
+  name         String
+  role         String        @default("Technician")
+  standardHours Float        @default(0)
+  actualHours   Float        @default(0)
+  jobsCompleted Int          @default(0)
+  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+}

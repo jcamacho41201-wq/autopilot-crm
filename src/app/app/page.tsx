@@ -7,12 +7,11 @@ import {
   CheckCircle2,
   Clock,
   DollarSign,
-  FileText,
   PackageSearch,
   Send,
   Wrench
 } from "lucide-react";
-import { createAppointmentAction, generateQuoteFromMaintenanceAction, sendMockReminderAction } from "@/lib/actions";
+import { createAppointmentAction, sendMockReminderAction } from "@/lib/actions";
 import { requireUser } from "@/lib/auth";
 import {
   getCapacityForecast,
@@ -83,15 +82,6 @@ function ReminderForm({ card, label = "Send Reminder" }: { card: VehicleAttentio
   );
 }
 
-function QuoteForm({ card }: { card: VehicleAttentionCard }) {
-  return (
-    <form action={generateQuoteFromMaintenanceAction}>
-      {card.attentionRows.map((row) => <input key={row.item.id} type="hidden" name="maintenanceIds" value={row.item.id} />)}
-      <button className="button" type="submit"><FileText /> Generate Quote</button>
-    </form>
-  );
-}
-
 function RevenueForecastChart({ data }: { data: ReturnType<typeof getRevenueForecast> }) {
   const hasData = data.some((point) => point.booked > 0 || point.predicted > 0);
   if (!hasData) {
@@ -139,7 +129,7 @@ function BarRow({ label, value, max, tone = "" }: { label: string; value: number
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const [appointments, maintenance, opportunities, inventory, customers, quotes] = await Promise.all([
+  const [appointments, maintenance, opportunities, inventory, customers] = await Promise.all([
     prisma.appointment.findMany({
       where: { shopId: user.shopId },
       orderBy: { scheduledAt: "asc" },
@@ -168,15 +158,11 @@ export default async function DashboardPage() {
         serviceRecords: { orderBy: { serviceDate: "desc" }, take: 1 },
         appointments: { orderBy: { scheduledAt: "desc" }, take: 1 }
       }
-    }),
-    prisma.quote.findMany({
-      where: { shopId: user.shopId },
-      orderBy: { createdAt: "desc" }
     })
   ]);
 
   const asOf = new Date();
-  const maintenanceRows = getMaintenanceRows(maintenance, asOf);
+  const maintenanceRows = getMaintenanceRows(maintenance.filter((item) => item.serviceId), asOf);
   const vehicleCards = getVehiclesRequiringAttention(maintenanceRows, appointments, asOf);
   const snapshot = getTodayShopSnapshot(appointments, vehicleCards, asOf);
   const pipeline = getRevenuePipeline(appointments, maintenanceRows, opportunities, asOf);
@@ -196,12 +182,6 @@ export default async function DashboardPage() {
   ).slice(0, 6);
   const maxStatus = Math.max(maintenanceStatus.healthy, maintenanceStatus.dueSoon, maintenanceStatus.overdue, 1);
   const maxServiceRevenue = Math.max(1, ...revenueByService.map((item) => item.revenue));
-  const approvedQuotes = quotes.filter((quote) => quote.status === "APPROVED");
-  const pendingQuotes = quotes.filter((quote) => quote.status === "DRAFT" || quote.status === "SENT");
-  const declinedQuotes = quotes.filter((quote) => quote.status === "DECLINED");
-  const quoteConversionRate = quotes.length ? Math.round((approvedQuotes.length / quotes.length) * 100) : 0;
-  const approvedQuoteRevenue = approvedQuotes.reduce((sum, quote) => sum + quote.total, 0);
-  const pendingQuoteRevenue = pendingQuotes.reduce((sum, quote) => sum + quote.total, 0);
 
   return (
     <>
@@ -232,31 +212,24 @@ export default async function DashboardPage() {
         <div className="card stat"><span className="muted">Deferred Opportunity</span><strong>{money.format(pipeline.deferredRevenue)}</strong><span className="badge">{opportunities.length} open</span></div>
       </section>
 
-      <section className="grid grid-5" style={{ marginTop: 16 }}>
-        <div className="card stat"><span className="muted">Potential Revenue</span><strong>{money.format(pipeline.totalOpportunity + pendingQuoteRevenue)}</strong><span className="badge warn">Maintenance + quotes</span></div>
-        <div className="card stat"><span className="muted">Booked Revenue</span><strong>{money.format(pipeline.bookedRevenue + approvedQuoteRevenue)}</strong><span className="badge ok">Calendar + approved</span></div>
-        <div className="card stat"><span className="muted">Approved Quotes</span><strong>{approvedQuotes.length}</strong><span className="badge ok">{money.format(approvedQuoteRevenue)}</span></div>
-        <div className="card stat"><span className="muted">Pending Quotes</span><strong>{pendingQuotes.length}</strong><span className="badge warn">{money.format(pendingQuoteRevenue)}</span></div>
-        <div className="card stat"><span className="muted">Quote Conversion</span><strong>{quoteConversionRate}%</strong><span className="badge">Approval rate</span></div>
-      </section>
-
       <section className="dashboard-grid" style={{ marginTop: 16 }}>
         <div className="panel dashboard-wide">
           <div className="row">
-            <h2>Vehicles Requiring Attention</h2>
-            <Link className="text-link" href="/app/maintenance">View all</Link>
+            <h2>Owner Action List</h2>
+            <Link className="button secondary" href="/app/maintenance">Open Daily Revenue Queue</Link>
           </div>
           <div className="list" style={{ marginTop: 12 }}>
-            {vehicleCards.length ? vehicleCards.map((card) => {
+            {topOpportunities.length ? topOpportunities.map((card) => {
               const { Icon, badge, label } = priorityMeta(card.priority);
               return (
-                <details className="vehicle-queue-card dashboard-attention-card" key={card.vehicle.id}>
-                  <summary>
+                <div className="card dashboard-attention-card" key={card.vehicle.id}>
+                  <div className="row">
                     <div className="dashboard-attention-main">
                       <span className={`badge ${badge}`}><Icon size={15} /> {label}</span>
                       <div>
                         <strong>{card.customer.name}</strong>
                         <p>{vehicleName(card)} · {number.format(card.vehicle.currentMileage)} mi</p>
+                        <p>{card.attentionRows[0]?.item.name ?? "Maintenance opportunity"} · {dueLabel(card)}</p>
                       </div>
                     </div>
                     <div className="queue-summary">
@@ -265,40 +238,18 @@ export default async function DashboardPage() {
                       <span className={`badge ${card.healthScore < 35 ? "danger" : card.healthScore < 60 ? "warn" : "ok"}`}>{card.healthScore}/100 health</span>
                       <span className="badge">{money.format(card.opportunityValue)}</span>
                     </div>
-                  </summary>
+                  </div>
                   <div className="queue-preview">
-                    <span><strong>Next Due:</strong> {dueLabel(card)}</span>
                     <span><strong>Next Best Action:</strong> {card.nextBestAction}</span>
                     <div className="queue-actions">
                       <Link className="button secondary" href={`/app/customers/${card.customer.id}/vehicles/${card.vehicle.id}`}><Wrench /> Open Vehicle</Link>
                       <ReminderForm card={card} />
                       <AppointmentForm card={card} />
-                      <QuoteForm card={card} />
                     </div>
                   </div>
-                  <div className="table-wrap">
-                    <table>
-                      <thead><tr><th>Service</th><th>Status</th><th>Life Remaining</th><th>Due Mileage</th><th>Due Date</th><th>Estimated Revenue</th></tr></thead>
-                      <tbody>
-                        {card.attentionRows.map(({ item, prediction }) => (
-                          <tr key={item.id}>
-                            <td><strong>{item.name}</strong></td>
-                            <td><span className={`badge ${prediction.statusTone}`}>{prediction.status}</span></td>
-                            <td>
-                              <div className="progress"><span style={{ width: `${prediction.remainingLifePercentage}%` }} /></div>
-                              <small>{prediction.remainingLifePercentage}% remaining</small>
-                            </td>
-                            <td>{number.format(prediction.dueMileage)} mi</td>
-                            <td>{prediction.isOverdue ? "Overdue" : dateLabel(prediction.dueDate)}</td>
-                            <td>{money.format(item.averagePrice)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </details>
+                </div>
               );
-            }) : <p>No vehicles need attention right now. Add service intervals to begin predicting maintenance.</p>}
+            }) : <p>No vehicles need attention right now. Add service intervals from Vehicle Dashboards to begin predicting maintenance.</p>}
           </div>
         </div>
 
@@ -370,52 +321,21 @@ export default async function DashboardPage() {
 
       <section className="dashboard-grid" style={{ marginTop: 16 }}>
         <div className="panel dashboard-wide">
-          <h2>Top Opportunities</h2>
+          <h2>Low Inventory Alerts</h2>
           <div className="list" style={{ marginTop: 12 }}>
-            {topOpportunities.length ? topOpportunities.map((card) => (
-              <div className="card" key={card.vehicle.id}>
+            {inventoryAlerts.length ? inventoryAlerts.map(({ item, runout }) => (
+              <div className="card" key={item.id}>
                 <div className="row">
-                  <div>
-                    <strong>{card.customer.name}</strong>
-                    <p>{vehicleName(card)} · {card.overdueCount ? `${card.overdueCount} overdue services` : `${card.dueCount + card.dueSoonCount} due soon services`}</p>
-                  </div>
-                  <span className="badge warn">{money.format(card.opportunityValue)} opportunity</span>
+                  <strong>{item.name}</strong>
+                  <span className="badge danger">{item.quantityOnHand} {item.unitType}</span>
                 </div>
-                <div className="queue-actions">
-                  <ReminderForm card={card} />
-                  <AppointmentForm card={card} />
-                  <QuoteForm card={card} />
-                  <Link className="button secondary" href={`/app/customers/${card.customer.id}/vehicles/${card.vehicle.id}`}><Wrench /> Open Vehicle</Link>
-                </div>
+                <p>Threshold: {item.reorderThreshold} {item.unitType} · Runout: {runout.runoutDays !== null ? `${runout.runoutDays} days` : "unknown"}</p>
+                <p>Suggested reorder: {runout.suggestedReorderQuantity} {item.unitType}</p>
               </div>
-            )) : <p>No open opportunities yet.</p>}
+            )) : <p>No low inventory alerts.</p>}
           </div>
         </div>
         <aside className="grid">
-          <div className="panel">
-            <h2>Quote Reporting</h2>
-            <div className="list" style={{ marginTop: 12 }}>
-              <BarRow label="Quotes Created" value={quotes.length} max={Math.max(quotes.length, 1)} />
-              <BarRow label="Quotes Approved" value={approvedQuotes.length} max={Math.max(quotes.length, 1)} tone="ok" />
-              <BarRow label="Quotes Declined" value={declinedQuotes.length} max={Math.max(quotes.length, 1)} tone="danger" />
-              <div className="mini-row"><span>Revenue Generated From Quotes</span><strong>{money.format(approvedQuoteRevenue)}</strong></div>
-            </div>
-          </div>
-          <div className="panel">
-            <h2>Low Inventory Alerts</h2>
-            <div className="list" style={{ marginTop: 12 }}>
-              {inventoryAlerts.length ? inventoryAlerts.map(({ item, runout }) => (
-                <div className="card" key={item.id}>
-                  <div className="row">
-                    <strong>{item.name}</strong>
-                    <span className="badge danger">{item.quantityOnHand} {item.unitType}</span>
-                  </div>
-                  <p>Threshold: {item.reorderThreshold} {item.unitType} · Runout: {runout.runoutDays !== null ? `${runout.runoutDays} days` : "unknown"}</p>
-                  <p>Suggested reorder: {runout.suggestedReorderQuantity} {item.unitType}</p>
-                </div>
-              )) : <p>No low inventory alerts.</p>}
-            </div>
-          </div>
           <div className="panel">
             <h2>Customer Retention</h2>
             {customers.length ? (

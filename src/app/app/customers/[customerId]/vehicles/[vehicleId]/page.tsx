@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CalendarPlus, CheckCircle2, FileText, Gauge, MessageSquareText, Plus, Save, Trash2, Wrench } from "lucide-react";
+import { ArrowLeft, CalendarPlus, CheckCircle2, Gauge, MessageSquareText, Plus, Save, Trash2, Wrench } from "lucide-react";
 import {
   addMileageAction,
   applyRecommendedServicesAction,
@@ -12,8 +12,6 @@ import {
   deleteMaintenanceItemAction,
   deleteVehicleAction,
   flagMileageCorrectionAction,
-  generateQuoteFromMaintenanceAction,
-  generateQuoteFromServiceRecordAction,
   sendMockReminderAction,
   updateMileageLogAction,
   updateMaintenanceItemAction,
@@ -100,8 +98,7 @@ export default async function VehicleDashboardPage({
       maintenanceItems: { include: { service: true } },
       serviceRecords: { orderBy: { serviceDate: "desc" }, take: 12 },
       appointments: { orderBy: { scheduledAt: "asc" }, take: 12 },
-      opportunities: { where: { status: "OPEN" } },
-      quotes: { orderBy: { updatedAt: "desc" }, take: 8 }
+      opportunities: { where: { status: "OPEN" } }
     }
   });
   if (!vehicle) notFound();
@@ -136,11 +133,9 @@ export default async function VehicleDashboardPage({
   const healthScore = rows.length
     ? Math.round(rows.reduce((sum, row) => sum + row.prediction.remainingLifePercentage, 0) / rows.length)
     : 100;
-  const opportunityRows = rows.filter((row) => row.prediction.status !== "Healthy");
+  const opportunityRows = rows.filter((row) => row.item.serviceId && row.prediction.status !== "Healthy");
+  const unmappedRows = rows.filter((row) => !row.item.serviceId);
   const potentialRevenue = opportunityRows.reduce((sum, row) => sum + row.item.averagePrice, 0);
-  const pendingQuoteRevenue = vehicle.quotes
-    .filter((quote) => quote.status === "DRAFT" || quote.status === "SENT")
-    .reduce((sum, quote) => sum + quote.total, 0);
   const highestPriority = opportunityRows[0] ?? rows[0];
   const lastVisit = vehicle.serviceRecords[0]?.serviceDate;
   const nextAppointment = vehicle.appointments
@@ -181,13 +176,13 @@ export default async function VehicleDashboardPage({
         <div className="card stat"><span className="muted">Current Mileage</span><strong>{vehicle.currentMileage.toLocaleString()}</strong><span className="badge">Vehicle profile</span></div>
         <div className="card stat"><span className="muted">Vehicle Health</span><strong>{healthScore}/100</strong><span className={`badge ${healthScore < 35 ? "danger" : healthScore < 60 ? "warn" : "ok"}`}>Predicted</span></div>
         <div className="card stat"><span className="muted">Potential Revenue</span><strong>{money.format(potentialRevenue)}</strong><span className="badge warn">{opportunityRows.length} open</span></div>
-        <div className="card stat"><span className="muted">Pending Quotes</span><strong>{money.format(pendingQuoteRevenue)}</strong><span className="badge">{vehicle.quotes.length} quotes</span></div>
+        <div className="card stat"><span className="muted">Needs Template Mapping</span><strong>{unmappedRows.length}</strong><span className="badge">Setup</span></div>
         <div className="card stat"><span className="muted">Next Appointment</span><strong>{nextAppointment ? dateLabel(nextAppointment.scheduledAt) : "None"}</strong><span className="badge">Calendar</span></div>
       </section>
 
       <section className="split" style={{ marginTop: 16 }}>
         <div className="grid">
-          <div className="panel">
+          <div className="panel" id="mileage-management">
             <h2>Vehicle Summary</h2>
             <div className="grid grid-3">
               <div className="card"><strong>Vehicle</strong><p>{vehicle.year} {vehicle.make} {vehicle.model}{vehicle.trim ? ` ${vehicle.trim}` : ""}</p></div>
@@ -391,9 +386,19 @@ export default async function VehicleDashboardPage({
                 ) : <p>No recommended unassigned services are available for this vehicle.</p>}
               </details>
             </div>
+            {unmappedRows.length ? (
+              <div className="card" style={{ marginTop: 12 }}>
+                <div className="row">
+                  <strong>Service Template Mapping Needed</strong>
+                  <span className="badge warn">{unmappedRows.length} unmapped</span>
+                </div>
+                <p>These items stay on the vehicle profile, but they are not counted as revenue opportunities until they are recreated from the Service Library.</p>
+                <Link className="button secondary" href="/app/settings/service-library">Open Service Library</Link>
+              </div>
+            ) : null}
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Service</th><th>Status</th><th>Due Date</th><th>Due Mileage</th><th>Revenue</th><th>Remaining Life</th><th>Manage</th></tr></thead>
+                <thead><tr><th>Service Template</th><th>Status</th><th>Due Date</th><th>Due Mileage</th><th>Revenue</th><th>Remaining Life</th><th>Manage</th></tr></thead>
                 <tbody>
                   {rows.length ? rows.map(({ item, prediction }) => (
                     <tr key={item.id}>
@@ -408,7 +413,7 @@ export default async function VehicleDashboardPage({
                               item.reminderThresholdPercentage !== item.service.defaultReminderThreshold
                               ? "Using Custom Interval"
                               : `Library: ${item.service.category}`
-                            : "Custom vehicle service"}
+                            : "Needs Service Template"}
                         </span>
                       </td>
                       <td><span className={`badge ${prediction.statusTone}`}>{prediction.status}</span></td>
@@ -477,14 +482,9 @@ export default async function VehicleDashboardPage({
             <div className="list">
               {vehicle.serviceRecords.length ? vehicle.serviceRecords.map((record) => (
                 <div className="card" key={record.id}>
-                <div className="row"><strong>{record.summary}</strong><span className="badge">{money.format(record.revenue)}</span></div>
-                <p>{dateLabel(record.serviceDate)} · {record.mileage.toLocaleString()} mi · {record.notes ?? "No notes"}</p>
-                <form action={generateQuoteFromServiceRecordAction} style={{ marginTop: 10 }}>
-                  <input type="hidden" name="serviceRecordId" value={record.id} />
-                  <input type="hidden" name="estimatedRevenue" value={record.revenue || 120} />
-                  <button className="button secondary" type="submit"><FileText /> Follow-Up Quote</button>
-                </form>
-              </div>
+                  <div className="row"><strong>{record.summary}</strong><span className="badge">{money.format(record.revenue)}</span></div>
+                  <p>{dateLabel(record.serviceDate)} · {record.mileage.toLocaleString()} mi · {record.notes ?? "No notes"}</p>
+                </div>
               )) : <p>No service records yet.</p>}
             </div>
           </div>
@@ -494,20 +494,7 @@ export default async function VehicleDashboardPage({
           <div className="panel">
             <h2>Quick Actions</h2>
             <div className="grid">
-              <details className="inline-details modal-details">
-                <summary className="button"><Plus /> Add Mileage Reading</summary>
-                <div className="modal-panel">
-                  <form className="form" action={addMileageAction}>
-                    <input type="hidden" name="vehicleId" value={vehicle.id} />
-                    <input type="hidden" name="returnTo" value={vehiclePath} />
-                    <label>Mileage<input name="mileage" type="number" min={0} required /></label>
-                    <label>Date<input name="loggedAt" type="date" defaultValue={yyyyMmDd(new Date())} /></label>
-                    <label>Source<select name="source"><option>Service Visit</option><option>Customer Update</option><option>Manual Entry</option><option>Odometer Inspection</option></select></label>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="confirmLowerMileage" /> Confirm Lower Mileage</label>
-                    <button className="button" type="submit"><Gauge /> Save reading</button>
-                  </form>
-                </div>
-              </details>
+              <a className="button" href="#mileage-management"><Gauge /> Add Mileage Reading</a>
               <details className="inline-details">
                 <summary className="button secondary"><Wrench /> Create Service Record</summary>
                 <form className="form" action={createServiceRecordAction}>
@@ -537,12 +524,6 @@ export default async function VehicleDashboardPage({
                   <button className="button secondary" type="submit"><MessageSquareText /> Send Reminder</button>
                 </form>
               ) : <button className="button secondary" type="button" disabled><MessageSquareText /> Send Reminder</button>}
-              {opportunityRows.length ? (
-                <form action={generateQuoteFromMaintenanceAction}>
-                  {opportunityRows.map((row) => <input key={row.item.id} type="hidden" name="maintenanceIds" value={row.item.id} />)}
-                  <button className="button" type="submit"><FileText /> Generate Quote</button>
-                </form>
-              ) : <Link className="button secondary" href="/app/quotes"><FileText /> Create Quote</Link>}
               <a className="button secondary" href="#maintenance-schedule">View Maintenance Schedule</a>
             </div>
           </div>

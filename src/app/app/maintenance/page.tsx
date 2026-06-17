@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { CalendarPlus, FileText, MessageSquareText, Send, Wrench } from "lucide-react";
-import { createAppointmentAction, generateQuoteFromMaintenanceAction, sendMockReminderAction } from "@/lib/actions";
+import { CalendarPlus, MessageSquareText, Send, Wrench } from "lucide-react";
+import { createAppointmentAction, sendMockReminderAction } from "@/lib/actions";
 import { requireUser } from "@/lib/auth";
 import { dateLabel, dateTimeInputValue, money, number } from "@/lib/format";
 import { buildMaintenanceQueue, isOpenMaintenanceOpportunity, type MaintenanceQueueRow, type MaintenanceQueueSource } from "@/lib/maintenanceQueue";
@@ -86,15 +86,6 @@ function ReminderForm({ maintenanceId, label = "Send Reminder" }: { maintenanceI
   );
 }
 
-function QuoteForm({ rows }: { rows: MaintenanceQueueRow[] }) {
-  return (
-    <form action={generateQuoteFromMaintenanceAction}>
-      {rows.map((row) => <input key={row.item.id} type="hidden" name="maintenanceIds" value={row.item.id} />)}
-      <button className="button" type="submit"><FileText /> Generate Quote</button>
-    </form>
-  );
-}
-
 function BarRow({ label, value, max, tone = "" }: { label: string; value: number; max: number; tone?: string }) {
   const width = max > 0 ? Math.max(value > 0 ? 6 : 0, Math.round((value / max) * 100)) : 0;
   return (
@@ -111,6 +102,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
     where: { vehicle: { customer: { shopId: user.shopId } } },
     include: {
       vehicle: { include: { customer: true, mileageLogs: true } },
+      service: true,
       reminders: { orderBy: { sentAt: "desc" }, take: 1 }
     },
     orderBy: { name: "asc" }
@@ -143,6 +135,11 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
         <div className="card stat"><span className="muted">Vehicles To Contact</span><strong>{queue.kpis.vehiclesDue}</strong><span className="badge warn">Unique vehicles</span></div>
         <div className="card stat"><span className="muted">Customers Ready</span><strong>{queue.kpis.customersReady}</strong><span className="badge ok">Contact today</span></div>
       </section>
+      {queue.unmappedCount ? (
+        <p className="badge warn" style={{ marginBottom: 16, marginTop: 12 }}>
+          {queue.unmappedCount} maintenance item{queue.unmappedCount === 1 ? "" : "s"} need Service Library mapping before they become revenue opportunities.
+        </p>
+      ) : null}
 
       <section className="maintenance-pipeline-grid" style={{ marginTop: 16 }}>
         <div className="panel maintenance-priority-panel">
@@ -179,15 +176,14 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                     <Link className="button secondary" href={`/app/customers/${card.customer.id}/vehicles/${card.vehicle.id}`}><Wrench /> Open Vehicle</Link>
                     <ReminderForm maintenanceId={highest?.item.id} />
                     <AppointmentForm customerId={card.customer.id} vehicleId={card.vehicle.id} serviceName={primaryService} revenue={primaryRevenue} />
-                    <QuoteForm rows={card.opportunityRows} />
                   </div>
                   <div className="table-wrap">
                     <table>
-                      <thead><tr><th>Service</th><th>Status</th><th>Revenue</th><th>Due</th><th>Life</th></tr></thead>
+                      <thead><tr><th>Service Template</th><th>Status</th><th>Revenue</th><th>Due</th><th>Life</th></tr></thead>
                       <tbody>
                         {card.opportunityRows.map(({ item, prediction }) => (
                           <tr key={item.id}>
-                            <td><strong>{item.name}</strong></td>
+                            <td><strong>{item.service?.name ?? item.name}</strong><br /><span className="muted">Vehicle: {card.vehicle.year} {card.vehicle.make} {card.vehicle.model}</span></td>
                             <td><span className={`badge ${prediction.statusTone}`}>{severity(prediction.status)} {prediction.status}</span></td>
                             <td>{money.format(item.averagePrice)}</td>
                             <td>{prediction.isOverdue ? "Overdue" : dateLabel(prediction.dueDate)}</td>

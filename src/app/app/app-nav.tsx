@@ -2,15 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, CalendarDays, FileText, Gauge, LogOut, PackageSearch, Settings, Users, Wrench, MessageSquareText, UserCog } from "lucide-react";
+import { BarChart3, CalendarDays, Car, Gauge, LogOut, PackageSearch, Settings, Users, Wrench, MessageSquareText, UserCog } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { logoutAction } from "@/lib/actions";
 
 const nav: { href: string; label: string; Icon: LucideIcon }[] = [
   { href: "/app", label: "Dashboard", Icon: BarChart3 },
-  { href: "/app/customers", label: "Customers", Icon: Users },
   { href: "/app/maintenance", label: "Maintenance", Icon: Wrench },
-  { href: "/app/quotes", label: "Quotes", Icon: FileText },
+  { href: "/app/vehicles", label: "Vehicles", Icon: Car },
+  { href: "/app/customers", label: "Customers", Icon: Users },
   { href: "/app/calendar", label: "Calendar", Icon: CalendarDays },
   { href: "/app/reminders", label: "Reminders", Icon: MessageSquareText },
   { href: "/app/forecast", label: "Forecast", Icon: Gauge },

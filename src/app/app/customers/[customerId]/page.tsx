@@ -1,18 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CalendarPlus, Car, FileText, Mail, MessageSquareText, Phone, Plus, Save, Trash2, Wrench } from "lucide-react";
+import { ArrowLeft, CalendarPlus, Car, Mail, MessageSquareText, Phone, Plus, Save, Trash2, Wrench } from "lucide-react";
 import {
-  createServiceRecordAction,
-  deleteServiceRecordAction,
   createVehicleAction,
   deleteCustomerAction,
-  generateQuoteFromMaintenanceAction,
-  generateQuoteFromServiceRecordAction,
-  updateServiceRecordAction,
   updateCustomerAction
 } from "@/lib/actions";
 import { requireUser } from "@/lib/auth";
-import { dateLabel, money, yyyyMmDd } from "@/lib/format";
+import { dateLabel, money } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { estimateAnnualMiles, maintenancePrediction, type MaintenanceWithVehicle } from "@/lib/predictions";
 
@@ -47,8 +42,7 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
             opportunities: { where: { status: "OPEN" } }
           },
           orderBy: { updatedAt: "desc" }
-        },
-        quotes: { orderBy: { updatedAt: "desc" }, take: 12 },
+        }
       }
     }),
     prisma.reminderLog.findMany({
@@ -92,11 +86,8 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
   const openOpportunity = customer.vehicles
     .flatMap((vehicle) => vehicle.opportunities)
     .reduce((sum, opportunity) => sum + opportunity.estimatedRevenue, 0);
-  const pendingQuotes = customer.quotes.filter((quote) => quote.status === "DRAFT" || quote.status === "SENT");
-  const approvedQuotes = customer.quotes.filter((quote) => quote.status === "APPROVED");
-  const quoteOpportunity = pendingQuotes.reduce((sum, quote) => sum + quote.total, 0);
   const maintenancePotentialRevenue = maintenanceRows
-    .filter((row) => row.prediction.status !== "Healthy")
+    .filter((row) => row.item.serviceId && row.prediction.status !== "Healthy")
     .reduce((sum, row) => sum + row.item.averagePrice, 0);
   const overdueMaintenanceCount = maintenanceRows.filter((row) => row.prediction.status === "Overdue").length;
   const dueSoonMaintenanceCount = maintenanceRows.filter((row) => row.prediction.status === "Due" || row.prediction.status === "Due Soon").length;
@@ -130,8 +121,8 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
       <section className="grid grid-4">
         <div className="card stat"><span className="muted">Customer score</span><strong>{customerScore}/100</strong><span className={`badge ${customerScore < 35 ? "danger" : customerScore < 60 ? "warn" : "ok"}`}>{scoreLabel(customerScore)}</span></div>
         <div className="card stat"><span className="muted">Lifetime spend</span><strong>{money.format(lifetimeSpend)}</strong><span className="badge">Recorded work</span></div>
-        <div className="card stat"><span className="muted">Open opportunity</span><strong>{money.format(openOpportunity + quoteOpportunity)}</strong><span className="badge warn">Deferred + quotes</span></div>
-        <div className="card stat"><span className="muted">Approved quotes</span><strong>{money.format(approvedQuotes.reduce((sum, quote) => sum + quote.total, 0))}</strong><span className="badge ok">{approvedQuotes.length} approved</span></div>
+        <div className="card stat"><span className="muted">Open opportunity</span><strong>{money.format(openOpportunity + maintenancePotentialRevenue)}</strong><span className="badge warn">Vehicles</span></div>
+        <div className="card stat"><span className="muted">Booked revenue</span><strong>{money.format(bookedRevenue)}</strong><span className="badge">Scheduled</span></div>
       </section>
       <section className="grid grid-4" style={{ marginTop: 16 }}>
         <div className="card stat"><span className="muted">Vehicles</span><strong>{customer.vehicles.length}</strong><span className="badge">Active profiles</span></div>
@@ -166,40 +157,28 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
                 const overdueCount = vehicleRows.filter((row) => row.prediction.status === "Overdue").length;
                 const dueCount = vehicleRows.filter((row) => row.prediction.status === "Due").length;
                 const dueSoonCount = vehicleRows.filter((row) => row.prediction.status === "Due Soon").length;
-                const healthyCount = vehicleRows.filter((row) => row.prediction.status === "Healthy").length;
                 const potentialRevenue = vehicleRows
-                  .filter((row) => row.prediction.status !== "Healthy")
+                  .filter((row) => row.item.serviceId && row.prediction.status !== "Healthy")
                   .reduce((sum, row) => sum + row.item.averagePrice, 0);
                 const openVehicleOpportunity = vehicle.opportunities.reduce((sum, opportunity) => sum + opportunity.estimatedRevenue, 0);
                 return (
-                  <details className="card detail-card" id={`vehicle-${vehicle.id}`} key={vehicle.id}>
-                    <summary>
-                      <div>
-                        <h3><Car size={17} /> {vehicle.year} {vehicle.make} {vehicle.model}</h3>
-                        <p>{vehicle.trim ? `${vehicle.trim} · ` : ""}{vehicle.vehicleType ?? "Vehicle"} · {vehicle.currentMileage.toLocaleString()} mi · {annualMiles.toLocaleString()} learned miles/year</p>
-                        <p>VIN {vehicle.vin ?? "not set"} · Plate {vehicle.licensePlate ?? "not set"} · Last service {vehicle.serviceRecords[0]?.mileage.toLocaleString() ?? "none"} mi</p>
-                        <Link className="text-link" href={`/app/customers/${customer.id}/vehicles/${vehicle.id}`}>Open Vehicle Dashboard</Link>
-                      </div>
+                  <div className="card" id={`vehicle-${vehicle.id}`} key={vehicle.id}>
+                    <div className="row">
+                      <h3><Car size={17} /> {vehicle.year} {vehicle.make} {vehicle.model}</h3>
                       <span className={`badge ${vehicleScore < 35 ? "danger" : vehicleScore < 60 ? "warn" : "ok"}`}>{vehicleScore}/100</span>
-                    </summary>
-                    <div className="card" style={{ marginTop: 12 }}>
-                      <div className="row">
-                        <strong>Maintenance Summary</strong>
-                        <Link className="button secondary" href="/app/maintenance">View Maintenance Queue</Link>
-                      </div>
-                      <div className="mini-row"><span>Potential revenue</span><strong>{money.format(potentialRevenue)}</strong></div>
-                      <div className="mini-row"><span>Overdue</span><strong>{overdueCount}</strong></div>
-                      <div className="mini-row"><span>Due soon</span><strong>{dueCount + dueSoonCount}</strong></div>
-                      <div className="mini-row"><span>Vehicle health</span><strong>{vehicleScore}/100</strong></div>
-                      <p>{healthyCount} healthy service{healthyCount === 1 ? "" : "s"} · {money.format(openVehicleOpportunity)} deferred opportunity</p>
-                      {vehicleRows.some((row) => row.prediction.status !== "Healthy") ? (
-                        <form action={generateQuoteFromMaintenanceAction}>
-                          {vehicleRows.filter((row) => row.prediction.status !== "Healthy").map((row) => <input key={row.item.id} type="hidden" name="maintenanceIds" value={row.item.id} />)}
-                          <button className="button" type="submit"><FileText /> Generate Quote</button>
-                        </form>
-                      ) : null}
                     </div>
-                  </details>
+                    <p>{vehicle.trim ? `${vehicle.trim} · ` : ""}{vehicle.vehicleType ?? "Vehicle"} · {vehicle.currentMileage.toLocaleString()} mi · {annualMiles.toLocaleString()} learned miles/year</p>
+                    <p>VIN {vehicle.vin ?? "not set"} · Plate {vehicle.licensePlate ?? "not set"} · Last service {vehicle.serviceRecords[0]?.mileage.toLocaleString() ?? "none"} mi</p>
+                    <div className="grid grid-3">
+                      <div className="mini-stat"><span>Revenue</span><strong>{money.format(potentialRevenue + openVehicleOpportunity)}</strong></div>
+                      <div className="mini-stat"><span>Overdue</span><strong>{overdueCount}</strong></div>
+                      <div className="mini-stat"><span>Due Soon</span><strong>{dueCount + dueSoonCount}</strong></div>
+                    </div>
+                    <div className="queue-actions">
+                      <Link className="button secondary" href={`/app/customers/${customer.id}/vehicles/${vehicle.id}`}>Open Vehicle Dashboard</Link>
+                      <Link className="button secondary" href="/app/maintenance">Maintenance Queue</Link>
+                    </div>
+                  </div>
                 );
               }) : <p>No vehicles yet. Add the first vehicle to start tracking service life.</p>}
             </div>
@@ -242,79 +221,25 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
           </div>
 
           <div className="panel">
-            <h2>Recent Service History</h2>
+            <div className="row">
+              <h2>Recent Service History</h2>
+              <Link className="text-link" href="/app/vehicles">Open Vehicles</Link>
+            </div>
             <div className="list">
               {recentService.length ? recentService.map((record) => (
-                <details className="card detail-card" key={record.id}>
-                  <summary>
-                    <div>
+                <div className="card" key={record.id}>
+                  <div className="row">
+                  <div>
                     <strong>{record.summary}</strong>
                     <p>{dateLabel(record.serviceDate)} · {record.vehicle.year} {record.vehicle.make} {record.vehicle.model} · {record.mileage.toLocaleString()} mi · {record.notes ?? "No notes"}</p>
                     {record.nextRecommendedService ? <p>Next: {record.nextRecommendedService}{record.nextRecommendedMileage ? ` at ${record.nextRecommendedMileage.toLocaleString()} mi` : ""}</p> : null}
                   </div>
                   <span className="badge">{money.format(record.revenue)}</span>
-                  </summary>
-                  <form className="form" action={generateQuoteFromServiceRecordAction} style={{ marginTop: 12 }}>
-                    <input type="hidden" name="serviceRecordId" value={record.id} />
-                    <label>Estimated follow-up revenue<input name="estimatedRevenue" type="number" min={0} step="0.01" defaultValue={record.revenue || 120} /></label>
-                    <button className="button" type="submit"><FileText /> Generate Follow-Up Quote</button>
-                  </form>
-                  <form className="form" action={updateServiceRecordAction} style={{ marginTop: 12 }}>
-                    <input type="hidden" name="serviceRecordId" value={record.id} />
-                    <div className="form-row">
-                      <label>Date<input name="serviceDate" type="date" defaultValue={yyyyMmDd(record.serviceDate)} /></label>
-                      <label>Mileage<input name="mileage" type="number" min={0} defaultValue={record.mileage} required /></label>
-                    </div>
-                    <label>Services performed<input name="summary" defaultValue={record.summary} required /></label>
-                    <label>Notes<textarea name="notes" defaultValue={record.notes ?? ""} /></label>
-                    <div className="form-row">
-                      <label>Invoice amount<input name="revenue" type="number" min={0} step="0.01" defaultValue={record.revenue} /></label>
-                      <label>Technician ID<input name="technicianId" defaultValue={record.technicianId ?? ""} /></label>
-                    </div>
-                    <div className="form-row">
-                      <label>Next service<input name="nextRecommendedService" defaultValue={record.nextRecommendedService ?? ""} /></label>
-                      <label>Next mileage<input name="nextRecommendedMileage" type="number" min={0} defaultValue={record.nextRecommendedMileage ?? ""} /></label>
-                    </div>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="confirmLowerMileage" /> Confirm lower mileage</label>
-                    <button className="button secondary" type="submit"><Save /> Save service record</button>
-                  </form>
-                  <form className="form danger-zone" action={deleteServiceRecordAction}>
-                    <input type="hidden" name="serviceRecordId" value={record.id} />
-                    <button className="button danger-button" type="submit"><Trash2 /> Delete service record</button>
-                  </form>
-                </details>
+                  </div>
+                  <Link className="text-link" href={`/app/customers/${customer.id}/vehicles/${record.vehicle.id}`}>Manage on Vehicle Dashboard</Link>
+                </div>
               )) : <p>No service records yet.</p>}
             </div>
-          </div>
-
-          <div className="panel">
-            <h2>Create Service Record</h2>
-            {customer.vehicles.length ? <form className="form" action={createServiceRecordAction}>
-              <input type="hidden" name="returnTo" value={customerPath} />
-              <label>Vehicle
-                <select name="vehicleId" required>
-                  {customer.vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.year} {vehicle.make} {vehicle.model}</option>)}
-                </select>
-              </label>
-              <label>Technician<input name="technicianId" placeholder="Optional technician ID from Team page" /></label>
-              <div className="form-row">
-                <label>Date<input name="serviceDate" type="date" defaultValue={yyyyMmDd(new Date())} required /></label>
-                <label>Mileage<input name="mileage" type="number" min={0} required /></label>
-              </div>
-              <label>Service performed<input name="summary" required placeholder="Oil change and tire rotation" /></label>
-              <label>Notes<textarea name="notes" /></label>
-              <div className="form-row">
-                <label>Price<input name="revenue" type="number" min={0} step="0.01" defaultValue={0} /></label>
-                <label>Next mileage<input name="nextRecommendedMileage" type="number" min={0} /></label>
-              </div>
-              <label>Next recommended service<input name="nextRecommendedService" placeholder="Brake inspection" /></label>
-              <div className="form-row">
-                <label>Inventory barcode<input name="inventoryBarcode" placeholder="850001111001" /></label>
-                <label>Qty used<input name="inventoryQuantityUsed" type="number" min={0} step="0.1" /></label>
-              </div>
-              <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: 18 }} type="checkbox" name="confirmLowerMileage" /> Confirm lower mileage</label>
-              <button className="button" type="submit"><Wrench /> Add service record</button>
-            </form> : <p>Add a vehicle before creating service records.</p>}
           </div>
         </div>
 
@@ -365,7 +290,6 @@ export default async function CustomerDashboardPage({ params, searchParams }: { 
               <a className="button secondary" href={phoneHref(customer.phone, "sms")}><MessageSquareText /> Send SMS</a>
               <a className="button secondary" href={customer.email ? `mailto:${customer.email}` : "#"} aria-disabled={!customer.email}><Mail /> Send Email</a>
               <Link className="button" href="/app/calendar"><CalendarPlus /> Book Appointment</Link>
-              <Link className="button secondary" href="/app/quotes"><FileText /> Create Quote</Link>
             </div>
           </div>
 

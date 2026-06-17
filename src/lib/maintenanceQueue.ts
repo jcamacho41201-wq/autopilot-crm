@@ -1,7 +1,9 @@
+import type { Service } from "@prisma/client";
 import { maintenancePrediction, type MaintenanceWithVehicle } from "@/lib/predictions";
 
 export type MaintenanceQueueSource = MaintenanceWithVehicle & {
   reminders?: { status: string; sentAt: Date }[];
+  service?: Service | null;
 };
 
 export type MaintenanceQueueRow = {
@@ -25,13 +27,15 @@ function compareRows(a: MaintenanceQueueRow, b: MaintenanceQueueRow) {
 }
 
 export function isOpenMaintenanceOpportunity(row: MaintenanceQueueRow) {
-  return row.prediction.status === "Overdue" || row.prediction.status === "Due" || row.prediction.status === "Due Soon";
+  return Boolean(row.item.serviceId) && (row.prediction.status === "Overdue" || row.prediction.status === "Due" || row.prediction.status === "Due Soon");
 }
 
 export function buildMaintenanceQueue(maintenance: MaintenanceQueueSource[], asOf = new Date()) {
   const rows = maintenance
+    .filter((item) => Boolean(item.serviceId))
     .map((item) => ({ item, prediction: maintenancePrediction(item, asOf) }))
     .sort(compareRows);
+  const unmappedCount = maintenance.filter((item) => !item.serviceId).length;
   const cards = Array.from(new Map(rows.map((row) => [row.item.vehicleId, row.item.vehicle])).values())
     .map((vehicle) => {
       const vehicleRows = rows.filter((row) => row.item.vehicleId === vehicle.id).sort(compareRows);
@@ -89,6 +93,7 @@ export function buildMaintenanceQueue(maintenance: MaintenanceQueueSource[], asO
       openOpportunities: overdueRevenue + dueSoonRevenue,
       vehiclesDue: cards.length,
       customersReady: new Set(cards.map((card) => card.customer.id)).size
-    }
+    },
+    unmappedCount
   };
 }

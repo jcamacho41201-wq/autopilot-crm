@@ -650,6 +650,7 @@ export async function createMaintenanceItemAction(formData: FormData) {
   const fallback = returnTo(formData, "/app/maintenance");
   const serviceId = stringValue(formData, "serviceId") || null;
   const service = serviceId ? await prisma.service.findFirst({ where: { id: serviceId, shopId: user.shopId } }) : null;
+  if (!service) failWithMessage(formData, fallback, "Select a Service Library template before adding maintenance to a vehicle.");
   const mileageInterval = requiredMileage(formData, "mileageInterval") ?? service?.defaultMileageInterval ?? null;
   if (mileageInterval === null || mileageInterval <= 0) failWithMessage(formData, fallback, "Mileage interval must be greater than zero.");
   const timeIntervalMonths = optionalNumberValue(formData, "timeIntervalMonths") ?? service?.defaultTimeIntervalMonths ?? 6;
@@ -1068,6 +1069,7 @@ async function maintenanceQuoteLines(shopId: string, maintenanceIds: string[]) {
   const items = await prisma.maintenanceItem.findMany({
     where: {
       id: { in: maintenanceIds },
+      serviceId: { not: null },
       vehicle: { customer: { shopId } }
     },
     include: { vehicle: true }

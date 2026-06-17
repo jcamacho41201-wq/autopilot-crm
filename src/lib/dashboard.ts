@@ -7,6 +7,7 @@ import type {
   MaintenanceItem,
   MileageLog,
   ReminderLog,
+  Service,
   ServiceRecord,
   Technician,
   Vehicle
@@ -26,8 +27,11 @@ export type DashboardMaintenance = MaintenanceItem & {
   vehicle: Vehicle & {
     customer: Pick<Customer, "id" | "name" | "phone" | "email">;
     mileageLogs: MileageLog[];
+    serviceRecords?: Pick<ServiceRecord, "serviceDate">[];
+    appointments?: Pick<Appointment, "scheduledAt" | "status">[];
   };
   reminders?: Pick<ReminderLog, "status" | "sentAt">[];
+  service?: Pick<Service, "id" | "name" | "category"> | null;
 };
 
 export type DashboardOpportunity = DeferredOpportunity & {
@@ -59,12 +63,14 @@ export type VehicleAttentionCard = {
   healthyCount: number;
   opportunityValue: number;
   healthScore: number;
+  priorityScore: number;
   lowestLife: number;
   priority: "red" | "yellow" | "green" | "gray";
   priorityLabel: string;
   nextDueLabel: string;
   nextBestAction: "Send Reminder" | "Book Appointment" | "View Appointment" | "Open Vehicle";
   primaryMaintenanceId: string | null;
+  lastVisit: Date | null;
 };
 
 function startOfDay(date = new Date()) {
@@ -91,6 +97,48 @@ function compareRows(a: DashboardMaintenanceRow, b: DashboardMaintenanceRow) {
     a.prediction.remainingLifePercentage - b.prediction.remainingLifePercentage ||
     b.item.averagePrice - a.item.averagePrice
   );
+}
+
+function clamp(value: number, min = 0, max = 100) {
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function vehicleHealthScore(params: {
+  vehicleRows: DashboardMaintenanceRow[];
+  overdueCount: number;
+  dueCount: number;
+  dueSoonCount: number;
+  lastVisit: Date | null;
+  asOf: Date;
+}) {
+  const base = params.vehicleRows.length
+    ? params.vehicleRows.reduce((sum, row) => sum + row.prediction.remainingLifePercentage, 0) / params.vehicleRows.length
+    : 100;
+  const daysSinceVisit = params.lastVisit ? Math.max(0, Math.round((params.asOf.getTime() - params.lastVisit.getTime()) / DAY_MS)) : 999;
+  const historyPenalty = params.lastVisit ? 0 : 8;
+  const visitPenalty = daysSinceVisit > 365 ? 18 : daysSinceVisit > 180 ? 10 : daysSinceVisit > 120 ? 5 : 0;
+  return clamp(base - params.overdueCount * 12 - params.dueCount * 7 - params.dueSoonCount * 3 - historyPenalty - visitPenalty);
+}
+
+function priorityScore(params: {
+  overdueCount: number;
+  dueCount: number;
+  dueSoonCount: number;
+  opportunityValue: number;
+  healthScore: number;
+  latestReminder?: Pick<ReminderLog, "status" | "sentAt"> | null;
+  lastVisit: Date | null;
+  hasAppointment: boolean;
+  asOf: Date;
+}) {
+  const daysSinceVisit = params.lastVisit ? Math.max(0, Math.round((params.asOf.getTime() - params.lastVisit.getTime()) / DAY_MS)) : 365;
+  const revenueScore = Math.min(25, params.opportunityValue / 40);
+  const maintenanceScore = Math.min(30, params.overdueCount * 12 + params.dueCount * 7 + params.dueSoonCount * 4);
+  const healthScore = Math.min(18, (100 - params.healthScore) * 0.18);
+  const visitScore = Math.min(12, daysSinceVisit / 30);
+  const reminderScore = params.latestReminder && params.latestReminder.sentAt >= addDays(params.asOf, -14) ? 0 : 8;
+  const appointmentScore = params.hasAppointment ? -12 : 7;
+  return clamp(maintenanceScore + revenueScore + healthScore + visitScore + reminderScore + appointmentScore);
 }
 
 export function getMaintenanceRows(maintenance: DashboardMaintenance[], asOf = new Date()) {
@@ -122,17 +170,19 @@ export function getVehiclesRequiringAttention(rows: DashboardMaintenanceRow[], a
       const dueSoonCount = vehicleRows.filter((row) => row.prediction.status === "Due Soon").length;
       const healthyCount = vehicleRows.filter((row) => row.prediction.status === "Healthy").length;
       const opportunityValue = attentionRows.reduce((sum, row) => sum + row.item.averagePrice, 0);
-      const healthScore = vehicleRows.length
-        ? Math.round(vehicleRows.reduce((sum, row) => sum + row.prediction.remainingLifePercentage, 0) / vehicleRows.length)
-        : 100;
       const lowestLife = vehicleRows[0]?.prediction.remainingLifePercentage ?? 100;
       const latestReminder = vehicleRows
         .flatMap((row) => row.item.reminders ?? [])
         .sort((a, b) => b.sentAt.getTime() - a.sentAt.getTime())[0];
+      const lastVisit = (vehicle.serviceRecords ?? [])
+        .map((record) => record.serviceDate)
+        .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
       const recentlyReminded = latestReminder ? latestReminder.sentAt >= addDays(asOf, -14) : false;
       const priority = overdueCount ? "red" : dueCount + dueSoonCount ? "yellow" : vehicleRows.length ? "green" : "gray";
       const primaryMaintenanceId = attentionRows[0]?.item.id ?? null;
       const hasAppointment = activeAppointmentsByVehicle.has(vehicle.id);
+      const healthScore = vehicleHealthScore({ vehicleRows, overdueCount, dueCount, dueSoonCount, lastVisit, asOf });
+      const customerPriority = priorityScore({ overdueCount, dueCount, dueSoonCount, opportunityValue, healthScore, latestReminder, lastVisit, hasAppointment, asOf });
       const nextBestAction = hasAppointment
         ? "View Appointment"
         : attentionRows.length && !recentlyReminded
@@ -152,16 +202,19 @@ export function getVehiclesRequiringAttention(rows: DashboardMaintenanceRow[], a
         healthyCount,
         opportunityValue,
         healthScore,
+        priorityScore: customerPriority,
         lowestLife,
         priority,
         priorityLabel: overdueCount ? "Overdue" : dueCount + dueSoonCount ? "Due soon" : vehicleRows.length ? "Healthy" : "No data",
         nextDueLabel: overdueCount ? "Overdue" : attentionRows[0] ? attentionRows[0].prediction.dueDate.toISOString() : "Healthy",
         nextBestAction,
-        primaryMaintenanceId
+        primaryMaintenanceId,
+        lastVisit
       } satisfies VehicleAttentionCard;
     })
     .filter((card) => card.attentionRows.length > 0)
     .sort((a, b) =>
+      b.priorityScore - a.priorityScore ||
       b.overdueCount - a.overdueCount ||
       b.opportunityValue - a.opportunityValue ||
       b.dueSoonCount + b.dueCount - (a.dueSoonCount + a.dueCount) ||
@@ -227,18 +280,21 @@ export function getRevenueForecast(appointments: DashboardAppointment[], rows: D
   const today = startOfDay(asOf);
   return Array.from({ length: 13 }, (_, index) => {
     const start = addDays(today, index * 7);
-    const end = addDays(start, 7);
     const booked = appointments
-      .filter((appointment) => appointment.status === "BOOKED" && appointment.scheduledAt >= start && appointment.scheduledAt < end)
+      .filter((appointment) => appointment.status === "BOOKED" && appointment.scheduledAt >= today && appointment.scheduledAt <= start)
       .reduce((sum, appointment) => sum + appointment.estimatedRevenue, 0);
     const predicted = rows
-      .filter((row) => isAttentionStatus(row.prediction.status) && row.prediction.dueDate >= start && row.prediction.dueDate < end)
+      .filter((row) => isAttentionStatus(row.prediction.status) && row.prediction.status !== "Overdue" && row.prediction.dueDate >= today && row.prediction.dueDate <= start)
+      .reduce((sum, row) => sum + row.item.averagePrice, 0);
+    const overdue = rows
+      .filter((row) => row.prediction.status === "Overdue")
       .reduce((sum, row) => sum + row.item.averagePrice, 0);
     return {
       start,
       booked,
       predicted,
-      total: booked + predicted
+      overdue,
+      total: booked + predicted + overdue
     };
   });
 }
@@ -256,12 +312,24 @@ export function getRevenueByServiceType(rows: DashboardMaintenanceRow[]) {
     rows
       .filter((row) => isAttentionStatus(row.prediction.status))
       .reduce((map, row) => {
-        const current = map.get(row.item.name) ?? 0;
-        map.set(row.item.name, current + row.item.averagePrice);
+        const service = row.item.service?.name ?? row.item.name;
+        const current = map.get(service) ?? { service, revenue: 0, vehicleIds: new Set<string>(), vehicles: [] as Array<{ id: string; customerId: string; label: string; customerName: string; status: string }> };
+        current.revenue += row.item.averagePrice;
+        if (!current.vehicleIds.has(row.item.vehicleId)) {
+          current.vehicleIds.add(row.item.vehicleId);
+          current.vehicles.push({
+            id: row.item.vehicleId,
+            customerId: row.item.vehicle.customer.id,
+            label: `${row.item.vehicle.year} ${row.item.vehicle.make} ${row.item.vehicle.model}`,
+            customerName: row.item.vehicle.customer.name,
+            status: row.prediction.status
+          });
+        }
+        map.set(service, current);
         return map;
-      }, new Map<string, number>())
+      }, new Map<string, { service: string; revenue: number; vehicleIds: Set<string>; vehicles: Array<{ id: string; customerId: string; label: string; customerName: string; status: string }> }>())
   )
-    .map(([service, revenue]) => ({ service, revenue }))
+    .map(([, value]) => ({ service: value.service, revenue: value.revenue, vehicleCount: value.vehicleIds.size, vehicles: value.vehicles }))
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 6);
 }
@@ -275,11 +343,15 @@ export function getCapacityForecast(appointments: DashboardAppointment[], asOf =
       .filter((appointment) => appointment.status === "BOOKED" && appointment.scheduledAt >= start && appointment.scheduledAt < end)
       .reduce((sum, appointment) => sum + appointment.durationMinutes, 0);
     const availableMinutes = Math.max(0, DAILY_CAPACITY_MINUTES - scheduledMinutes);
+    const utilization = Math.round((scheduledMinutes / DAILY_CAPACITY_MINUTES) * 100);
     return {
       date: start,
       scheduledMinutes,
       availableMinutes,
-      utilization: Math.round((scheduledMinutes / DAILY_CAPACITY_MINUTES) * 100)
+      scheduledHours: Math.round((scheduledMinutes / 60) * 10) / 10,
+      availableHours: Math.round((availableMinutes / 60) * 10) / 10,
+      utilization,
+      tone: utilization >= 90 ? "danger" : utilization >= 70 ? "warn" : "ok"
     };
   });
 }

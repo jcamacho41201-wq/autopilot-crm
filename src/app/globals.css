@@ -277,6 +277,10 @@ p {
   gap: 16px;
 }
 
+.grid-1 {
+  grid-template-columns: 1fr;
+}
+
 .grid-2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -809,6 +813,65 @@ textarea {
   align-items: flex-start;
 }
 
+.owner-action-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  max-height: 620px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.owner-action-card {
+  padding: 14px;
+}
+
+.priority-score {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  min-width: 120px;
+}
+
+.priority-score span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.priority-score strong {
+  font-size: 1.55rem;
+}
+
+.owner-action-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.appointment-compact-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.compact-appointment {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px;
+}
+
+.compact-appointment span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
 .chart-card {
   margin-top: 14px;
 }
@@ -844,6 +907,11 @@ textarea {
 .revenue-chart .predicted {
   stroke: var(--warn);
   stroke-dasharray: 8 8;
+}
+
+.revenue-chart .overdue {
+  stroke: var(--danger);
+  stroke-dasharray: 5 8;
 }
 
 .revenue-chart text {
@@ -885,6 +953,47 @@ textarea {
 
 .legend-predicted {
   background: var(--warn);
+}
+
+.legend-overdue {
+  background: var(--danger);
+}
+
+.service-opportunity-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px;
+}
+
+.service-opportunity-row summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.service-opportunity-row summary::-webkit-details-marker {
+  display: none;
+}
+
+.service-vehicle-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.service-vehicle-list a {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.2fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.service-vehicle-list a:hover {
+  background: var(--surface-2);
 }
 
 .bar-row {
@@ -934,6 +1043,18 @@ textarea {
   background: var(--surface);
 }
 
+.capacity-day:has(.badge.ok) {
+  border-left: 4px solid var(--ok);
+}
+
+.capacity-day:has(.badge.warn) {
+  border-left: 4px solid var(--warn);
+}
+
+.capacity-day:has(.badge.danger) {
+  border-left: 4px solid var(--danger);
+}
+
 .capacity-day p {
   margin: 8px 0 0;
   font-size: 0.86rem;
@@ -943,6 +1064,10 @@ textarea {
   display: grid;
   gap: 10px;
   justify-items: start;
+}
+
+.compact-status-card {
+  max-width: 280px;
 }
 
 .service-category-group {

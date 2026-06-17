@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   const numericQuery = Number(query.replace(/[^\d]/g, ""));
   const mileageMatch = Number.isFinite(numericQuery) && numericQuery > 0 ? Math.round(numericQuery) : null;
 
-  const [customers, vehicles, appointments, records, maintenance, quotes] = await Promise.all([
+  const [customers, vehicles, appointments, records, maintenance, services, quotes] = await Promise.all([
     prisma.customer.findMany({
       where: {
         shopId: user.shopId,
@@ -95,6 +95,19 @@ export async function GET(request: Request) {
       take: 6,
       orderBy: { name: "asc" }
     }),
+    prisma.service.findMany({
+      where: {
+        shopId: user.shopId,
+        OR: [
+          { name: contains(query) },
+          { category: contains(query) },
+          { description: contains(query) },
+          { recommendedNotes: contains(query) }
+        ]
+      },
+      take: 6,
+      orderBy: [{ category: "asc" }, { name: "asc" }]
+    }),
     prisma.quote.findMany({
       where: {
         shopId: user.shopId,
@@ -147,6 +160,13 @@ export async function GET(request: Request) {
       title: item.name,
       subtitle: `${item.vehicle.customer.name} · ${item.vehicle.year} ${item.vehicle.make} ${item.vehicle.model} · ${money.format(item.averagePrice)}`,
       href: `/app/customers/${item.vehicle.customerId}/vehicles/${item.vehicleId}#maintenance-schedule`
+    })),
+    ...services.map((service) => ({
+      id: service.id,
+      category: "Services",
+      title: service.name,
+      subtitle: `${service.category} · ${money.format(service.averagePrice)} · ${service.defaultMileageInterval.toLocaleString()} mi`,
+      href: "/app/settings/service-library"
     })),
     ...quotes.map((quote) => ({
       id: quote.id,

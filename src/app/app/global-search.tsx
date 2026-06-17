@@ -66,7 +66,7 @@ export function GlobalSearch() {
           aria-label="Search Maintiva"
           onFocus={() => setOpen(true)}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search customers, vehicles, VINs, appointments..."
+          placeholder="Search customers, vehicles, VINs, plates, appointments, services..."
           value={query}
         />
       </label>

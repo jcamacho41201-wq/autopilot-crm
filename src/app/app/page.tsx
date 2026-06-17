@@ -6,8 +6,7 @@ import {
   CalendarPlus,
   CheckCircle2,
   Clock,
-  DollarSign,
-  PackageSearch,
+  Phone,
   Send,
   Wrench
 } from "lucide-react";
@@ -18,12 +17,10 @@ import {
   getLowInventoryAlerts,
   getMaintenanceRows,
   getMaintenanceStatusBreakdown,
-  getRetentionSnapshot,
   getRevenueByServiceType,
   getRevenueForecast,
   getRevenuePipeline,
   getTodayShopSnapshot,
-  getTopOpportunities,
   getVehiclesRequiringAttention,
   type VehicleAttentionCard
 } from "@/lib/dashboard";
@@ -83,7 +80,7 @@ function ReminderForm({ card, label = "Send Reminder" }: { card: VehicleAttentio
 }
 
 function RevenueForecastChart({ data }: { data: ReturnType<typeof getRevenueForecast> }) {
-  const hasData = data.some((point) => point.booked > 0 || point.predicted > 0);
+  const hasData = data.some((point) => point.booked > 0 || point.predicted > 0 || point.overdue > 0);
   if (!hasData) {
     return <div className="chart-empty">No forecast data yet. Add appointments and maintenance intervals to generate a revenue forecast.</div>;
   }
@@ -94,7 +91,7 @@ function RevenueForecastChart({ data }: { data: ReturnType<typeof getRevenueFore
   const maxRevenue = Math.max(1, ...data.map((point) => point.total));
   const x = (index: number) => pad + (index / Math.max(1, data.length - 1)) * (width - pad * 2);
   const y = (value: number) => height - pad - (value / maxRevenue) * (height - pad * 2);
-  const points = (key: "booked" | "predicted" | "total") => data.map((point, index) => `${x(index).toFixed(1)},${y(point[key]).toFixed(1)}`).join(" ");
+  const points = (key: "booked" | "predicted" | "overdue" | "total") => data.map((point, index) => `${x(index).toFixed(1)},${y(point[key]).toFixed(1)}`).join(" ");
 
   return (
     <div className="chart-card">
@@ -104,6 +101,7 @@ function RevenueForecastChart({ data }: { data: ReturnType<typeof getRevenueFore
         <polyline className="total" points={points("total")} />
         <polyline className="booked" points={points("booked")} />
         <polyline className="predicted" points={points("predicted")} />
+        <polyline className="overdue" points={points("overdue")} />
         <text x={pad} y={pad - 10}>{money.format(maxRevenue)}</text>
         <text x={pad} y={height - 8}>{dateLabel(data[0].start)}</text>
         <text x={width - pad - 46} y={height - 8}>{dateLabel(data[data.length - 1].start)}</text>
@@ -112,6 +110,7 @@ function RevenueForecastChart({ data }: { data: ReturnType<typeof getRevenueFore
         <span><i className="legend-total" /> Total opportunity</span>
         <span><i className="legend-booked" /> Booked revenue</span>
         <span><i className="legend-predicted" /> Predicted maintenance</span>
+        <span><i className="legend-overdue" /> Overdue revenue</span>
       </div>
     </div>
   );
@@ -127,9 +126,23 @@ function BarRow({ label, value, max, tone = "" }: { label: string; value: number
   );
 }
 
+function healthLabel(score: number) {
+  if (score >= 85) return "Healthy";
+  if (score >= 60) return "Fair";
+  if (score >= 35) return "Attention Needed";
+  return "Critical";
+}
+
+function healthTone(score: number) {
+  if (score >= 85) return "ok";
+  if (score >= 60) return "warn";
+  if (score >= 35) return "due";
+  return "danger";
+}
+
 export default async function DashboardPage() {
   const user = await requireUser();
-  const [appointments, maintenance, opportunities, inventory, customers] = await Promise.all([
+  const [appointments, maintenance, opportunities, inventory, reminderLogs] = await Promise.all([
     prisma.appointment.findMany({
       where: { shopId: user.shopId },
       orderBy: { scheduledAt: "asc" },
@@ -138,7 +151,15 @@ export default async function DashboardPage() {
     prisma.maintenanceItem.findMany({
       where: { vehicle: { customer: { shopId: user.shopId } } },
       include: {
-        vehicle: { include: { customer: true, mileageLogs: true } },
+        service: true,
+        vehicle: {
+          include: {
+            customer: true,
+            mileageLogs: true,
+            serviceRecords: { orderBy: { serviceDate: "desc" }, take: 1 },
+            appointments: { orderBy: { scheduledAt: "desc" }, take: 12 }
+          }
+        },
         reminders: { orderBy: { sentAt: "desc" }, take: 1 }
       }
     }),
@@ -152,11 +173,10 @@ export default async function DashboardPage() {
       include: { scanLogs: true },
       orderBy: { quantityOnHand: "asc" }
     }),
-    prisma.customer.findMany({
-      where: { shopId: user.shopId },
-      include: {
-        serviceRecords: { orderBy: { serviceDate: "desc" }, take: 1 },
-        appointments: { orderBy: { scheduledAt: "desc" }, take: 1 }
+    prisma.reminderLog.findMany({
+      where: {
+        sentAt: { gte: new Date(Date.now() - 30 * 86400000) },
+        maintenanceItem: { vehicle: { customer: { shopId: user.shopId } } }
       }
     })
   ]);
@@ -170,26 +190,35 @@ export default async function DashboardPage() {
   const maintenanceStatus = getMaintenanceStatusBreakdown(maintenanceRows);
   const revenueByService = getRevenueByServiceType(maintenanceRows);
   const capacityForecast = getCapacityForecast(appointments, asOf);
-  const topOpportunities = getTopOpportunities(vehicleCards);
   const inventoryAlerts = getLowInventoryAlerts(inventory);
-  const retention = getRetentionSnapshot(customers, vehicleCards, asOf);
   const upcoming = Array.from(
     new Map(
       appointments
         .filter((appointment) => appointment.scheduledAt >= asOf && appointment.status === "BOOKED")
         .map((appointment) => [appointment.id, appointment])
     ).values()
-  ).slice(0, 6);
+  ).slice(0, 5);
   const maxStatus = Math.max(maintenanceStatus.healthy, maintenanceStatus.dueSoon, maintenanceStatus.overdue, 1);
   const maxServiceRevenue = Math.max(1, ...revenueByService.map((item) => item.revenue));
+  const maintenanceConversion = pipeline.totalOpportunity > 0 ? Math.round((pipeline.bookedRevenue / pipeline.totalOpportunity) * 100) : 0;
+  const remindedCustomerIds = new Set(reminderLogs.map((log) => log.customerId).filter(Boolean));
+  const bookedFromReminders = appointments
+    .filter((appointment) => appointment.status === "BOOKED" && appointment.createdAt >= new Date(Date.now() - 30 * 86400000) && remindedCustomerIds.has(appointment.customerId))
+    .length;
+  const reminderPerformance = {
+    textsSent: reminderLogs.filter((log) => log.status === "SENT" || log.status === "MOCK_SENT").length,
+    emailsSent: 0,
+    booked: bookedFromReminders,
+    responseRate: reminderLogs.length ? Math.round((bookedFromReminders / reminderLogs.length) * 100) : 0
+  };
 
   return (
     <>
       <header className="topbar">
         <div>
-          <p className="eyebrow">Maintiva Dashboard</p>
+          <p className="eyebrow">Revenue-first maintenance command center</p>
           <h1>{user.shop.name}</h1>
-          <p>Predict demand, book the calendar, and turn future maintenance into scheduled revenue.</p>
+          <p>Know who to contact, what vehicles are overdue, how full the calendar is, and which action creates revenue now.</p>
         </div>
         <div className="row">
           <Link className="button secondary" href={user.shop.bookingLink || `/booking/${user.shop.slug}`}><CalendarPlus /> Booking page</Link>
@@ -209,7 +238,10 @@ export default async function DashboardPage() {
         <div className="card stat"><span className="muted">Predicted Revenue</span><strong>{money.format(pipeline.predictedRevenue)}</strong><span className="badge ok">Next 30 days</span></div>
         <div className="card stat"><span className="muted">Overdue Revenue</span><strong>{money.format(pipeline.overdueRevenue)}</strong><span className="badge danger">Needs action</span></div>
         <div className="card stat"><span className="muted">Total Opportunity</span><strong>{money.format(pipeline.totalOpportunity)}</strong><span className="badge warn">Open pipeline</span></div>
-        <div className="card stat"><span className="muted">Deferred Opportunity</span><strong>{money.format(pipeline.deferredRevenue)}</strong><span className="badge">{opportunities.length} open</span></div>
+        <div className="card stat"><span className="muted">Maintenance Conversion</span><strong>{maintenanceConversion}%</strong><span className="badge ok">Revenue captured</span></div>
+      </section>
+      <section className="grid grid-1" style={{ marginTop: 16 }}>
+        <div className="card stat"><span className="muted">Deferred Opportunity</span><strong>{money.format(pipeline.deferredRevenue)}</strong><span className="badge">{opportunities.length} declined or postponed</span></div>
       </section>
 
       <section className="dashboard-grid" style={{ marginTop: 16 }}>
@@ -218,11 +250,11 @@ export default async function DashboardPage() {
             <h2>Owner Action List</h2>
             <Link className="button secondary" href="/app/maintenance">Open Daily Revenue Queue</Link>
           </div>
-          <div className="list" style={{ marginTop: 12 }}>
-            {topOpportunities.length ? topOpportunities.map((card) => {
+          <div className="owner-action-list">
+            {vehicleCards.length ? vehicleCards.map((card) => {
               const { Icon, badge, label } = priorityMeta(card.priority);
               return (
-                <div className="card dashboard-attention-card" key={card.vehicle.id}>
+                <div className="card dashboard-attention-card owner-action-card" key={card.vehicle.id}>
                   <div className="row">
                     <div className="dashboard-attention-main">
                       <span className={`badge ${badge}`}><Icon size={15} /> {label}</span>
@@ -232,19 +264,27 @@ export default async function DashboardPage() {
                         <p>{card.attentionRows[0]?.item.name ?? "Maintenance opportunity"} · {dueLabel(card)}</p>
                       </div>
                     </div>
-                    <div className="queue-summary">
-                      <span className="badge danger">{card.overdueCount} overdue</span>
-                      <span className="badge warn">{card.dueCount + card.dueSoonCount} due soon</span>
-                      <span className={`badge ${card.healthScore < 35 ? "danger" : card.healthScore < 60 ? "warn" : "ok"}`}>{card.healthScore}/100 health</span>
-                      <span className="badge">{money.format(card.opportunityValue)}</span>
+                    <div className="priority-score">
+                      <span>Priority Score</span>
+                      <strong>{card.priorityScore}/100</strong>
                     </div>
                   </div>
+                  <div className="owner-action-metrics">
+                    <span className={`badge ${healthTone(card.healthScore)}`}>Health {card.healthScore}/100 · {healthLabel(card.healthScore)}</span>
+                    <span className="badge danger">{card.overdueCount} overdue</span>
+                    <span className="badge warn">{card.dueCount + card.dueSoonCount} due soon</span>
+                    <span className="badge">{money.format(card.opportunityValue)} opportunity</span>
+                  </div>
                   <div className="queue-preview">
-                    <span><strong>Next Best Action:</strong> {card.nextBestAction}</span>
+                    <div className="queue-summary">
+                      <span><strong>Next Best Action:</strong> {card.nextBestAction}</span>
+                      <span><strong>Last Visit:</strong> {card.lastVisit ? dateLabel(card.lastVisit) : "No service history"}</span>
+                    </div>
                     <div className="queue-actions">
                       <Link className="button secondary" href={`/app/customers/${card.customer.id}/vehicles/${card.vehicle.id}`}><Wrench /> Open Vehicle</Link>
                       <ReminderForm card={card} />
                       <AppointmentForm card={card} />
+                      <a className="button secondary" href={`tel:${card.customer.phone.replace(/[^\d+]/g, "")}`}><Phone /> Call Customer</a>
                     </div>
                   </div>
                 </div>
@@ -256,17 +296,16 @@ export default async function DashboardPage() {
         <aside className="panel">
           <div className="row">
             <h2>Upcoming Appointments</h2>
-            <Link className="text-link" href="/app/calendar">Open Calendar</Link>
+            <Link className="button secondary" href="/app/calendar">View Full Calendar</Link>
           </div>
-          <div className="list" style={{ marginTop: 12 }}>
+          <div className="appointment-compact-list">
             {upcoming.length ? upcoming.map((appointment) => (
-              <div className="card" key={appointment.id}>
-                <div className="row">
-                  <strong>{dateLabel(appointment.scheduledAt)} · {appointment.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</strong>
-                  <span className="badge">{money.format(appointment.estimatedRevenue)}</span>
-                </div>
-                <p>{appointment.customer?.name ?? "Unknown customer"} · {appointment.vehicle ? `${appointment.vehicle.year} ${appointment.vehicle.make} ${appointment.vehicle.model}` : "Unknown vehicle"}</p>
-                <p>{appointment.serviceName} · {appointment.technician?.name ?? "Unassigned"} · {appointment.status}</p>
+              <div className="compact-appointment" key={appointment.id}>
+                <strong>{dateLabel(appointment.scheduledAt)} · {appointment.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</strong>
+                <span>{appointment.customer?.name ?? "Unknown customer"}</span>
+                <span>{appointment.vehicle ? `${appointment.vehicle.year} ${appointment.vehicle.make} ${appointment.vehicle.model}` : "Unknown vehicle"}</span>
+                <span>{appointment.serviceName}</span>
+                <strong>{money.format(appointment.estimatedRevenue)}</strong>
               </div>
             )) : (
               <div className="empty-state">
@@ -298,10 +337,26 @@ export default async function DashboardPage() {
           <h2>Revenue Opportunities By Service</h2>
           <div className="list" style={{ marginTop: 12 }}>
             {revenueByService.length ? revenueByService.map((item) => (
-              <div className="bar-row" key={item.service}>
-                <div className="mini-row"><span>{item.service}</span><strong>{money.format(item.revenue)}</strong></div>
-                <div className="bar-track"><span style={{ width: `${Math.max(8, Math.round((item.revenue / maxServiceRevenue) * 100))}%` }} /></div>
-              </div>
+              <details className="service-opportunity-row" key={item.service}>
+                <summary>
+                  <div className="bar-row">
+                    <div className="mini-row">
+                      <span>{item.service}</span>
+                      <strong>{money.format(item.revenue)} · {item.vehicleCount} vehicle{item.vehicleCount === 1 ? "" : "s"}</strong>
+                    </div>
+                    <div className="bar-track"><span style={{ width: `${Math.max(8, Math.round((item.revenue / maxServiceRevenue) * 100))}%` }} /></div>
+                  </div>
+                </summary>
+                <div className="service-vehicle-list">
+                  {item.vehicles.map((vehicle) => (
+                    <Link key={vehicle.id} href={`/app/customers/${vehicle.customerId}/vehicles/${vehicle.id}`}>
+                      <span>{vehicle.customerName}</span>
+                      <strong>{vehicle.label}</strong>
+                      <span className={`badge ${vehicle.status === "Overdue" ? "danger" : "warn"}`}>{vehicle.status}</span>
+                    </Link>
+                  ))}
+                </div>
+              </details>
             )) : <p>No open opportunities yet.</p>}
           </div>
         </div>
@@ -310,9 +365,9 @@ export default async function DashboardPage() {
           <div className="capacity-list">
             {capacityForecast.map((day) => (
               <div className="capacity-day" key={day.date.toISOString()}>
-                <div className="mini-row"><span>{dateLabel(day.date)}</span><strong>{day.utilization}%</strong></div>
-                <div className="bar-track"><span style={{ width: `${Math.min(100, day.utilization)}%` }} /></div>
-                <p>{day.scheduledMinutes} min scheduled · {day.availableMinutes} min open</p>
+                <div className="mini-row"><span>{dateLabel(day.date)}</span><strong className={`badge ${day.tone}`}>{day.utilization}%</strong></div>
+                <div className={`bar-track ${day.tone}`}><span style={{ width: `${Math.min(100, day.utilization)}%` }} /></div>
+                <p>{day.scheduledHours}h scheduled · {day.availableHours}h available</p>
               </div>
             ))}
           </div>
@@ -329,23 +384,26 @@ export default async function DashboardPage() {
                   <strong>{item.name}</strong>
                   <span className="badge danger">{item.quantityOnHand} {item.unitType}</span>
                 </div>
-                <p>Threshold: {item.reorderThreshold} {item.unitType} · Runout: {runout.runoutDays !== null ? `${runout.runoutDays} days` : "unknown"}</p>
-                <p>Suggested reorder: {runout.suggestedReorderQuantity} {item.unitType}</p>
+                <p>Threshold {item.reorderThreshold} {item.unitType} · Suggested reorder {runout.suggestedReorderQuantity} {item.unitType}</p>
               </div>
-            )) : <p>No low inventory alerts.</p>}
+            )) : (
+              <div className="card stat compact-status-card">
+                <span className="muted">Inventory Status</span>
+                <strong>Healthy</strong>
+                <span className="badge ok">0 alerts</span>
+              </div>
+            )}
           </div>
         </div>
         <aside className="grid">
           <div className="panel">
-            <h2>Customer Retention</h2>
-            {customers.length ? (
-              <div className="grid grid-2" style={{ marginTop: 12 }}>
-                <div className="card stat"><span className="muted">Active Customers</span><strong>{retention.active}</strong></div>
-                <div className="card stat"><span className="muted">At Risk</span><strong>{retention.atRisk}</strong></div>
-                <div className="card stat"><span className="muted">Inactive</span><strong>{retention.inactive}</strong></div>
-                <div className="card stat"><span className="muted">New This Month</span><strong>{retention.newThisMonth}</strong></div>
-              </div>
-            ) : <p>No customer history yet.</p>}
+            <h2>Reminder Performance</h2>
+            <div className="grid grid-2" style={{ marginTop: 12 }}>
+              <div className="card stat"><span className="muted">Texts Sent</span><strong>{number.format(reminderPerformance.textsSent)}</strong></div>
+              <div className="card stat"><span className="muted">Emails Sent</span><strong>{number.format(reminderPerformance.emailsSent)}</strong></div>
+              <div className="card stat"><span className="muted">Booked</span><strong>{number.format(reminderPerformance.booked)}</strong></div>
+              <div className="card stat"><span className="muted">Response Rate</span><strong>{reminderPerformance.responseRate}%</strong></div>
+            </div>
           </div>
         </aside>
       </section>

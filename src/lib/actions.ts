@@ -832,11 +832,12 @@ export async function deleteServiceRecordAction(formData: FormData) {
 
 export async function createAppointmentAction(formData: FormData) {
   const user = await requireUser();
-  await createAppointmentForShop(user.shopId, formData);
+  const appointment = await createAppointmentForShop(user.shopId, formData);
   revalidatePath("/app/calendar");
   revalidatePath("/app/maintenance");
   revalidatePath("/app/forecast");
   revalidatePath("/app");
+  if (appointment) revalidatePath(`/app/appointments/${appointment.id}`);
 }
 
 export async function moveAppointmentAction(formData: FormData) {
@@ -844,8 +845,13 @@ export async function moveAppointmentAction(formData: FormData) {
   const id = stringValue(formData, "id");
   const appointment = await prisma.appointment.findFirst({ where: { id, shopId: user.shopId } });
   if (!appointment) return;
-  await prisma.appointment.update({
-    where: { id },
+  await prisma.appointment.updateMany({
+    where: {
+      shopId: user.shopId,
+      customerId: appointment.customerId,
+      vehicleId: appointment.vehicleId,
+      scheduledAt: appointment.scheduledAt
+    },
     data: {
       scheduledAt: dateValue(formData, "scheduledAt", appointment.scheduledAt),
       technicianId: stringValue(formData, "technicianId") || null,
@@ -859,10 +865,13 @@ export async function moveAppointmentAction(formData: FormData) {
 export async function updateAppointmentAction(formData: FormData) {
   const user = await requireUser();
   const id = stringValue(formData, "id");
-  const appointment = await prisma.appointment.findFirst({ where: { id, shopId: user.shopId } });
+  const appointment = await prisma.appointment.findFirst({ where: { id, shopId: user.shopId }, include: { services: true } });
   if (!appointment) return;
   const vehicleId = stringValue(formData, "vehicleId", appointment.vehicleId);
   const vehicle = await prisma.vehicle.findFirst({ where: { id: vehicleId, customer: { shopId: user.shopId } } });
+  const serviceName = stringValue(formData, "serviceName", appointment.serviceName);
+  const estimatedRevenue = Math.max(0, numberValue(formData, "estimatedRevenue", appointment.estimatedRevenue));
+  const durationMinutes = Math.max(15, numberValue(formData, "durationMinutes", appointment.durationMinutes));
   await prisma.appointment.update({
     where: { id },
     data: {
@@ -870,15 +879,29 @@ export async function updateAppointmentAction(formData: FormData) {
       vehicleId,
       technicianId: stringValue(formData, "technicianId") || null,
       scheduledAt: dateValue(formData, "scheduledAt", appointment.scheduledAt),
-      durationMinutes: Math.max(15, numberValue(formData, "durationMinutes", appointment.durationMinutes)),
+      durationMinutes,
       status: stringValue(formData, "status", appointment.status),
-      serviceName: stringValue(formData, "serviceName", appointment.serviceName),
-      estimatedRevenue: Math.max(0, numberValue(formData, "estimatedRevenue", appointment.estimatedRevenue)),
+      serviceName,
+      estimatedRevenue,
+      estimatedJobHours: Math.round((durationMinutes / 60) * 10) / 10,
       notes: stringValue(formData, "notes") || null
     }
   });
+  if (formData.has("serviceName")) {
+    await prisma.appointmentService.deleteMany({ where: { appointmentId: id } });
+    await prisma.appointmentService.create({
+      data: {
+        appointmentId: id,
+        serviceName,
+        estimatedPrice: estimatedRevenue,
+        estimatedDurationMinutes: durationMinutes,
+        status: stringValue(formData, "status", appointment.status) === "COMPLETED" ? "COMPLETED" : "SCHEDULED"
+      }
+    });
+  }
   revalidatePath("/app/calendar");
   revalidatePath("/app");
+  revalidatePath(`/app/appointments/${id}`);
 }
 
 export async function deleteAppointmentAction(formData: FormData) {
@@ -886,7 +909,14 @@ export async function deleteAppointmentAction(formData: FormData) {
   const id = stringValue(formData, "id");
   const appointment = await prisma.appointment.findFirst({ where: { id, shopId: user.shopId } });
   if (!appointment) return;
-  await prisma.appointment.delete({ where: { id } });
+  await prisma.appointment.deleteMany({
+    where: {
+      shopId: user.shopId,
+      customerId: appointment.customerId,
+      vehicleId: appointment.vehicleId,
+      scheduledAt: appointment.scheduledAt
+    }
+  });
   revalidatePath("/app/calendar");
   revalidatePath("/app");
 }
@@ -945,18 +975,331 @@ export async function createPublicBookingAction(slug: string, formData: FormData
       previousCurrentMileage: existingVehicle.currentMileage
     });
   }
+  const serviceName = stringValue(formData, "serviceName");
+  const estimatedRevenue = numberValue(formData, "estimatedRevenue", 120);
+  const durationMinutes = numberValue(formData, "durationMinutes", 60);
   await prisma.appointment.create({
     data: {
       shopId: shop.id,
       customerId: customer.id,
       vehicleId: vehicle.id,
       scheduledAt: dateValue(formData, "scheduledAt"),
-      serviceName: stringValue(formData, "serviceName"),
-      estimatedRevenue: numberValue(formData, "estimatedRevenue", 120),
-      durationMinutes: numberValue(formData, "durationMinutes", 60)
+      serviceName,
+      estimatedRevenue,
+      durationMinutes,
+      estimatedJobHours: Math.round((durationMinutes / 60) * 10) / 10,
+      services: {
+        create: {
+          serviceName,
+          estimatedPrice: estimatedRevenue,
+          estimatedDurationMinutes: durationMinutes
+        }
+      }
     }
   });
   redirect(`/booking/${slug}?booked=1`);
+}
+
+type AppointmentServiceInput = {
+  serviceTemplateId?: string | null;
+  maintenanceItemId?: string | null;
+  serviceName: string;
+  estimatedPrice: number;
+  estimatedDurationMinutes: number;
+};
+
+function appointmentSummary(services: AppointmentServiceInput[]) {
+  const primary = services[0]?.serviceName || "Vehicle service";
+  const remaining = Math.max(0, services.length - 1);
+  return remaining ? `${primary} + ${remaining} more` : primary;
+}
+
+function appointmentTotals(services: AppointmentServiceInput[]) {
+  const totalValue = services.reduce((sum, service) => sum + service.estimatedPrice, 0);
+  const totalDurationMinutes = services.reduce((sum, service) => sum + service.estimatedDurationMinutes, 0);
+  return {
+    totalValue,
+    totalDurationMinutes: Math.max(15, totalDurationMinutes),
+    estimatedJobHours: Math.round((Math.max(15, totalDurationMinutes) / 60) * 10) / 10
+  };
+}
+
+function appointmentServiceIdentity(service: AppointmentServiceInput) {
+  return service.maintenanceItemId || `${service.serviceName}:${service.estimatedPrice}:${service.estimatedDurationMinutes}`;
+}
+
+async function appointmentServicesFromForm(shopId: string, vehicleId: string, formData: FormData): Promise<AppointmentServiceInput[]> {
+  const maintenanceIds = stringValues(formData, "maintenanceIds");
+  const servicesFromMaintenance = maintenanceIds.length
+    ? await prisma.maintenanceItem.findMany({
+        where: {
+          id: { in: maintenanceIds },
+          vehicleId,
+          vehicle: { customer: { shopId } }
+        },
+        include: { service: true }
+      })
+    : [];
+  const maintenanceServices = servicesFromMaintenance.map((item) => ({
+    serviceTemplateId: item.serviceId,
+    maintenanceItemId: item.id,
+    serviceName: item.service?.name ?? item.name,
+    estimatedPrice: Math.max(0, item.averagePrice),
+    estimatedDurationMinutes: Math.max(15, numberValue(formData, "estimatedDurationMinutes", 45))
+  }));
+
+  const serviceNames = stringValues(formData, "serviceNames");
+  const estimatedPrices = formData.getAll("estimatedPrices");
+  const estimatedDurations = formData.getAll("estimatedDurations");
+  const explicitServices = serviceNames.map((name, index) => ({
+    serviceTemplateId: null,
+    maintenanceItemId: null,
+    serviceName: name,
+    estimatedPrice: Math.max(0, Number(estimatedPrices[index] ?? 0) || 0),
+    estimatedDurationMinutes: Math.max(15, Number(estimatedDurations[index] ?? 60) || 60)
+  }));
+
+  const fallbackName = stringValue(formData, "serviceName");
+  const fallbackServices = fallbackName && !maintenanceServices.length && !explicitServices.length
+    ? [{
+        serviceTemplateId: null,
+        maintenanceItemId: null,
+        serviceName: fallbackName,
+        estimatedPrice: Math.max(0, numberValue(formData, "estimatedRevenue", 0)),
+        estimatedDurationMinutes: Math.max(15, numberValue(formData, "durationMinutes", 60))
+      }]
+    : [];
+
+  const unique = [...maintenanceServices, ...explicitServices, ...fallbackServices].reduce((map, service) => {
+    if (service.serviceName.trim() && !map.has(appointmentServiceIdentity(service))) {
+      map.set(appointmentServiceIdentity(service), service);
+    }
+    return map;
+  }, new Map<string, AppointmentServiceInput>());
+
+  return Array.from(unique.values());
+}
+
+async function syncAppointmentAggregate(appointmentId: string) {
+  const appointment = await prisma.appointment.findUnique({
+    where: { id: appointmentId },
+    include: { services: true }
+  });
+  if (!appointment) return null;
+  const services = appointment.services.map((service) => ({
+    serviceTemplateId: service.serviceTemplateId,
+    maintenanceItemId: service.maintenanceItemId,
+    serviceName: service.serviceName,
+    estimatedPrice: service.estimatedPrice,
+    estimatedDurationMinutes: service.estimatedDurationMinutes
+  }));
+  if (!services.length) {
+    return prisma.appointment.update({
+      where: { id: appointmentId },
+      data: {
+        serviceName: "Vehicle visit",
+        estimatedRevenue: 0,
+        durationMinutes: 60,
+        estimatedJobHours: 1
+      }
+    });
+  }
+  const totals = appointmentTotals(services);
+  return prisma.appointment.update({
+    where: { id: appointmentId },
+    data: {
+      serviceName: appointmentSummary(services),
+      estimatedRevenue: totals.totalValue,
+      durationMinutes: totals.totalDurationMinutes,
+      estimatedJobHours: totals.estimatedJobHours
+    }
+  });
+}
+
+export async function addAppointmentServiceAction(formData: FormData) {
+  const user = await requireUser();
+  const appointmentId = stringValue(formData, "appointmentId");
+  const appointment = await prisma.appointment.findFirst({
+    where: { id: appointmentId, shopId: user.shopId }
+  });
+  if (!appointment) return;
+  const maintenanceItemId = stringValue(formData, "maintenanceItemId") || null;
+  const maintenanceItem = maintenanceItemId
+    ? await prisma.maintenanceItem.findFirst({
+        where: { id: maintenanceItemId, vehicleId: appointment.vehicleId, vehicle: { customer: { shopId: user.shopId } } },
+        include: { service: true }
+      })
+    : null;
+  await prisma.appointmentService.create({
+    data: {
+      appointmentId,
+      serviceTemplateId: maintenanceItem?.serviceId ?? null,
+      maintenanceItemId: maintenanceItem?.id ?? null,
+      serviceName: maintenanceItem?.service?.name ?? maintenanceItem?.name ?? stringValue(formData, "serviceName", "Vehicle service"),
+      estimatedPrice: Math.max(0, optionalNumberValue(formData, "estimatedPrice") ?? maintenanceItem?.averagePrice ?? 0),
+      estimatedDurationMinutes: Math.max(15, optionalNumberValue(formData, "estimatedDurationMinutes") ?? 60)
+    }
+  });
+  await syncAppointmentAggregate(appointmentId);
+  revalidatePath(`/app/appointments/${appointmentId}`);
+  revalidatePath("/app/calendar");
+  revalidatePath("/app");
+}
+
+export async function removeAppointmentServiceAction(formData: FormData) {
+  const user = await requireUser();
+  const serviceId = stringValue(formData, "appointmentServiceId");
+  const service = await prisma.appointmentService.findFirst({
+    where: { id: serviceId, appointment: { shopId: user.shopId } }
+  });
+  if (!service) return;
+  await prisma.appointmentService.delete({ where: { id: service.id } });
+  await syncAppointmentAggregate(service.appointmentId);
+  revalidatePath(`/app/appointments/${service.appointmentId}`);
+  revalidatePath("/app/calendar");
+  revalidatePath("/app");
+}
+
+export async function cancelAppointmentAction(formData: FormData) {
+  const user = await requireUser();
+  const id = stringValue(formData, "id");
+  const appointment = await prisma.appointment.findFirst({ where: { id, shopId: user.shopId } });
+  if (!appointment) return;
+  await prisma.appointment.updateMany({
+    where: {
+      shopId: user.shopId,
+      customerId: appointment.customerId,
+      vehicleId: appointment.vehicleId,
+      scheduledAt: appointment.scheduledAt
+    },
+    data: { status: "CANCELLED" }
+  });
+  await prisma.appointmentService.updateMany({
+    where: {
+      appointment: {
+        shopId: user.shopId,
+        customerId: appointment.customerId,
+        vehicleId: appointment.vehicleId,
+        scheduledAt: appointment.scheduledAt
+      }
+    },
+    data: { status: "CANCELLED" }
+  });
+  revalidatePath(`/app/appointments/${id}`);
+  revalidatePath("/app/calendar");
+  revalidatePath("/app");
+}
+
+export async function completeAppointmentAction(formData: FormData) {
+  const user = await requireUser();
+  const id = stringValue(formData, "id");
+  const appointment = await prisma.appointment.findFirst({
+    where: { id, shopId: user.shopId },
+    include: { vehicle: true }
+  });
+  if (!appointment) return;
+  const mileage = requiredMileage(formData);
+  if (mileage === null) failWithMessage(formData, `/app/appointments/${id}`, "Completion mileage is required and cannot be negative.");
+  const mileageError = await validateMileageForVehicle(appointment.vehicleId, mileage, formData.get("confirmLowerMileage") === "on");
+  if (mileageError) failWithMessage(formData, `/app/appointments/${id}`, mileageError);
+  const visitAppointments = await prisma.appointment.findMany({
+    where: {
+      shopId: user.shopId,
+      customerId: appointment.customerId,
+      vehicleId: appointment.vehicleId,
+      scheduledAt: appointment.scheduledAt
+    },
+    include: { services: true }
+  });
+  const serviceDate = dateValue(formData, "serviceDate", new Date());
+  const serviceLines = visitAppointments.flatMap((visit) =>
+    visit.services.length
+      ? visit.services.map((service) => ({ appointment: visit, service }))
+      : [{
+          appointment: visit,
+          service: {
+            id: `legacy-${visit.id}`,
+            appointmentId: visit.id,
+            serviceTemplateId: null,
+            maintenanceItemId: null,
+            serviceName: visit.serviceName,
+            estimatedPrice: visit.estimatedRevenue,
+            estimatedDurationMinutes: visit.durationMinutes,
+            status: "SCHEDULED",
+            createdAt: visit.createdAt
+          }
+        }]
+  );
+  const totalRevenue = serviceLines.reduce((sum, line) => sum + line.service.estimatedPrice, 0);
+  for (const line of serviceLines) {
+    await prisma.serviceRecord.create({
+      data: {
+        shopId: user.shopId,
+        customerId: appointment.customerId,
+        vehicleId: appointment.vehicleId,
+        technicianId: appointment.technicianId,
+        serviceDate,
+        mileage,
+        summary: line.service.serviceName,
+        notes: stringValue(formData, "notes") || appointment.notes,
+        revenue: line.service.estimatedPrice
+      }
+    });
+    if (line.service.maintenanceItemId) {
+      await prisma.maintenanceItem.update({
+        where: { id: line.service.maintenanceItemId },
+        data: {
+          lastCompletedDate: serviceDate,
+          lastCompletedMileage: mileage,
+          status: "ACTIVE",
+          overrideDueDate: null,
+          overrideDueMileage: null
+        }
+      });
+    }
+  }
+  await prisma.customer.update({
+    where: { id: appointment.customerId },
+    data: { lifetimeSpend: { increment: totalRevenue } }
+  });
+  await prisma.appointment.updateMany({
+    where: {
+      shopId: user.shopId,
+      customerId: appointment.customerId,
+      vehicleId: appointment.vehicleId,
+      scheduledAt: appointment.scheduledAt
+    },
+    data: {
+      status: "COMPLETED",
+      actualJobHours: Math.round((serviceLines.reduce((sum, line) => sum + line.service.estimatedDurationMinutes, 0) / 60) * 10) / 10
+    }
+  });
+  await prisma.appointmentService.updateMany({
+    where: {
+      appointment: {
+        shopId: user.shopId,
+        customerId: appointment.customerId,
+        vehicleId: appointment.vehicleId,
+        scheduledAt: appointment.scheduledAt
+      }
+    },
+    data: { status: "COMPLETED" }
+  });
+  await recordMileage({
+    vehicleId: appointment.vehicleId,
+    mileage,
+    loggedAt: serviceDate,
+    source: "appointment completion",
+    previousCurrentMileage: appointment.vehicle.currentMileage,
+    allowLowerCurrent: formData.get("confirmLowerMileage") === "on"
+  });
+  revalidatePath(`/app/appointments/${id}`);
+  revalidatePath(vehicleDashboardPath(appointment.customerId, appointment.vehicleId));
+  revalidatePath(`/app/customers/${appointment.customerId}`);
+  revalidatePath("/app/calendar");
+  revalidatePath("/app/maintenance");
+  revalidatePath("/app/forecast");
+  revalidatePath("/app");
 }
 
 async function createAppointmentForShop(shopId: string, formData: FormData) {
@@ -964,19 +1307,60 @@ async function createAppointmentForShop(shopId: string, formData: FormData) {
   const vehicleId = stringValue(formData, "vehicleId");
   const customer = await prisma.customer.findFirst({ where: { id: customerId, shopId } });
   const vehicle = await prisma.vehicle.findFirst({ where: { id: vehicleId, customer: { shopId } } });
-  if (!customer || !vehicle) return;
-  await prisma.appointment.create({
+  if (!customer || !vehicle) return null;
+  const services = await appointmentServicesFromForm(shopId, vehicleId, formData);
+  if (!services.length) return null;
+  const scheduledAt = dateValue(formData, "scheduledAt");
+  const existing = await prisma.appointment.findFirst({
+    where: { shopId, customerId, vehicleId, scheduledAt },
+    include: { services: true }
+  });
+  if (existing) {
+    const existingIds = new Set(existing.services.map((service) => service.maintenanceItemId || `${service.serviceName}:${service.estimatedPrice}:${service.estimatedDurationMinutes}`));
+    const missingServices = services.filter((service) => !existingIds.has(appointmentServiceIdentity(service)));
+    for (const service of missingServices) {
+      await prisma.appointmentService.create({
+        data: {
+          appointmentId: existing.id,
+          serviceTemplateId: service.serviceTemplateId,
+          maintenanceItemId: service.maintenanceItemId,
+          serviceName: service.serviceName,
+          estimatedPrice: service.estimatedPrice,
+          estimatedDurationMinutes: service.estimatedDurationMinutes
+        }
+      });
+    }
+    await prisma.appointment.update({
+      where: { id: existing.id },
+      data: {
+        technicianId: stringValue(formData, "technicianId") || existing.technicianId,
+        notes: stringValue(formData, "notes") || existing.notes
+      }
+    });
+    return syncAppointmentAggregate(existing.id);
+  }
+  const totals = appointmentTotals(services);
+  return prisma.appointment.create({
     data: {
       shopId,
       customerId,
       vehicleId,
       technicianId: stringValue(formData, "technicianId") || null,
-      scheduledAt: dateValue(formData, "scheduledAt"),
-      durationMinutes: numberValue(formData, "durationMinutes", 60),
-      serviceName: stringValue(formData, "serviceName"),
-      estimatedRevenue: numberValue(formData, "estimatedRevenue", 0),
-      estimatedJobHours: numberValue(formData, "estimatedJobHours", 1),
-      notes: stringValue(formData, "notes") || null
+      scheduledAt,
+      durationMinutes: totals.totalDurationMinutes,
+      serviceName: appointmentSummary(services),
+      estimatedRevenue: totals.totalValue,
+      estimatedJobHours: totals.estimatedJobHours,
+      notes: stringValue(formData, "notes") || null,
+      services: {
+        create: services.map((service) => ({
+          serviceTemplateId: service.serviceTemplateId,
+          maintenanceItemId: service.maintenanceItemId,
+          serviceName: service.serviceName,
+          estimatedPrice: service.estimatedPrice,
+          estimatedDurationMinutes: service.estimatedDurationMinutes
+        }))
+      }
     }
   });
 }
@@ -1264,16 +1648,34 @@ export async function convertQuoteToAppointmentAction(formData: FormData) {
     include: { lines: true }
   });
   if (!quote) return;
+  const durationMinutes = numberValue(formData, "durationMinutes", 120);
+  const appointmentServices = quote.lines
+    .filter((line) => line.lineType !== "TAX" && line.lineType !== "DISCOUNT")
+    .map((line) => ({
+      serviceName: line.description,
+      estimatedPrice: Math.max(0, line.total),
+      estimatedDurationMinutes: Math.max(15, Math.round(durationMinutes / Math.max(1, quote.lines.length)))
+    }));
+  const services = appointmentServices.length ? appointmentServices : [{
+    serviceName: quote.quoteNumber,
+    estimatedPrice: quote.total,
+    estimatedDurationMinutes: durationMinutes
+  }];
+  const totals = appointmentTotals(services);
   await prisma.appointment.create({
     data: {
       shopId: user.shopId,
       customerId: quote.customerId,
       vehicleId: quote.vehicleId,
       scheduledAt: dateValue(formData, "scheduledAt", new Date(Date.now() + 86400000)),
-      durationMinutes: numberValue(formData, "durationMinutes", 120),
-      serviceName: quote.lines.filter((line) => line.lineType !== "TAX" && line.lineType !== "DISCOUNT").map((line) => line.description).join(", ").slice(0, 180) || quote.quoteNumber,
-      estimatedRevenue: quote.total,
-      notes: `Converted from quote ${quote.quoteNumber}.`
+      durationMinutes: totals.totalDurationMinutes,
+      serviceName: appointmentSummary(services),
+      estimatedRevenue: totals.totalValue,
+      estimatedJobHours: totals.estimatedJobHours,
+      notes: `Converted from quote ${quote.quoteNumber}.`,
+      services: {
+        create: services
+      }
     }
   });
   await prisma.quote.update({

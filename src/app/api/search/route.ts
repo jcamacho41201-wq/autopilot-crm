@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getVehicleVisitAppointments } from "@/lib/appointments";
 import { currentUser } from "@/lib/auth";
 import { dateLabel, money } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
@@ -53,12 +54,13 @@ export async function GET(request: Request) {
         OR: [
           { serviceName: contains(query) },
           { notes: contains(query) },
+          { services: { some: { serviceName: contains(query) } } },
           { customer: { name: contains(query) } },
           { vehicle: { make: contains(query) } },
           { vehicle: { model: contains(query) } }
         ]
       },
-      include: { customer: true, vehicle: true },
+      include: { customer: true, vehicle: true, services: true },
       take: 6,
       orderBy: { scheduledAt: "asc" }
     }),
@@ -125,6 +127,7 @@ export async function GET(request: Request) {
     })
   ]);
 
+  const appointmentVisits = getVehicleVisitAppointments(appointments);
   const results = [
     ...customers.map((customer) => ({
       id: customer.id,
@@ -140,12 +143,12 @@ export async function GET(request: Request) {
       subtitle: `${vehicle.customer.name} · VIN ${vehicle.vin ?? "not set"} · Plate ${vehicle.licensePlate ?? "not set"}`,
       href: `/app/customers/${vehicle.customerId}/vehicles/${vehicle.id}`
     })),
-    ...appointments.map((appointment) => ({
-      id: appointment.id,
+    ...appointmentVisits.map((appointment) => ({
+      id: appointment.primaryAppointmentId,
       category: "Appointments",
-      title: `${appointment.serviceName} - ${dateLabel(appointment.scheduledAt)}`,
-      subtitle: `${appointment.customer.name} · ${appointment.vehicle.year} ${appointment.vehicle.make} ${appointment.vehicle.model} · ${money.format(appointment.estimatedRevenue)}`,
-      href: "/app/calendar"
+      title: `${appointment.displayServiceSummary} - ${dateLabel(appointment.scheduledAt)}`,
+      subtitle: `${appointment.customer?.name ?? "Customer"} · ${appointment.vehicle?.year ?? ""} ${appointment.vehicle?.make ?? ""} ${appointment.vehicle?.model ?? ""} · ${money.format(appointment.totalValue)}`,
+      href: `/app/appointments/${appointment.primaryAppointmentId}`
     })),
     ...records.map((record) => ({
       id: record.id,

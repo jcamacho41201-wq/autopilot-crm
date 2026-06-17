@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { CalendarPlus, MoveRight } from "lucide-react";
 import { createAppointmentAction, deleteAppointmentAction, moveAppointmentAction, updateAppointmentAction } from "@/lib/actions";
+import { getVehicleVisitAppointments } from "@/lib/appointments";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { dateLabel, dateTimeInputValue, money } from "@/lib/format";
@@ -19,7 +21,7 @@ export default async function CalendarPage() {
   const [appointments, customers, vehicles, technicians] = await Promise.all([
     prisma.appointment.findMany({
       where: { shopId: user.shopId },
-      include: { customer: true, vehicle: true, technician: true },
+      include: { customer: true, vehicle: true, technician: true, services: true },
       orderBy: { scheduledAt: "asc" }
     }),
     prisma.customer.findMany({ where: { shopId: user.shopId }, orderBy: { name: "asc" } }),
@@ -27,6 +29,7 @@ export default async function CalendarPage() {
     prisma.technician.findMany({ where: { shopId: user.shopId } })
   ]);
   const days = weekDays();
+  const visits = getVehicleVisitAppointments(appointments);
 
   return (
     <>
@@ -42,7 +45,7 @@ export default async function CalendarPage() {
         <div className="panel">
           <div className="calendar">
             {days.map((day) => {
-              const dayAppointments = appointments.filter((appointment) => appointment.scheduledAt.toDateString() === day.toDateString());
+              const dayAppointments = visits.filter((appointment) => appointment.scheduledAt.toDateString() === day.toDateString());
               const revenue = dayAppointments.reduce((sum, appointment) => sum + appointment.estimatedRevenue, 0);
               const minutes = dayAppointments.reduce((sum, appointment) => sum + appointment.durationMinutes, 0);
               return (
@@ -54,12 +57,12 @@ export default async function CalendarPage() {
                   <small className="muted">{Math.round((minutes / 480) * 100)}% capacity · {Math.max(0, 480 - minutes)} min open</small>
                   <p className="eyebrow" style={{ marginTop: 8 }}>Daily Revenue: {money.format(revenue)}</p>
                   {dayAppointments.map((appointment) => (
-                    <div className="appointment-chip" key={appointment.id}>
+                    <Link className="appointment-chip appointment-visit-link" href={`/app/appointments/${appointment.primaryAppointmentId}`} key={appointment.visitKey}>
                       <strong>{appointment.scheduledAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</strong>
-                      <div>{appointment.serviceName} · {money.format(appointment.estimatedRevenue)}</div>
-                      <div>{appointment.customer.name} · {appointment.vehicle.year} {appointment.vehicle.make} {appointment.vehicle.model}</div>
-                      <div>{appointment.technician?.name ?? "Unassigned"} · {appointment.durationMinutes} min</div>
-                    </div>
+                      <div>{appointment.displayServiceSummary} · {money.format(appointment.totalValue)}</div>
+                      <div>{appointment.customer?.name ?? "Unknown customer"} · {appointment.vehicle ? `${appointment.vehicle.year} ${appointment.vehicle.make} ${appointment.vehicle.model}` : "Unknown vehicle"}</div>
+                      <div>{appointment.serviceCount} Services · {appointment.displayDuration} · {appointment.technician?.name ?? "Unassigned"}</div>
+                    </Link>
                   ))}
                 </div>
               );
@@ -87,7 +90,7 @@ export default async function CalendarPage() {
             <h2>Move Appointment</h2>
             <label>Appointment
               <select name="id">
-                {appointments.map((appointment) => <option key={appointment.id} value={appointment.id}>{dateLabel(appointment.scheduledAt)} · {appointment.customer.name} · {appointment.serviceName}</option>)}
+                {visits.map((appointment) => <option key={appointment.visitKey} value={appointment.primaryAppointmentId}>{dateLabel(appointment.scheduledAt)} · {appointment.customer?.name ?? "Unknown customer"} · {appointment.displayServiceSummary}</option>)}
               </select>
             </label>
             <label>New time<input name="scheduledAt" type="datetime-local" defaultValue={dateTimeInputValue(new Date(Date.now() + 2 * 86400000))} /></label>
@@ -99,7 +102,7 @@ export default async function CalendarPage() {
             <h2>Edit Appointment</h2>
             <label>Appointment
               <select name="id">
-                {appointments.map((appointment) => <option key={appointment.id} value={appointment.id}>{dateLabel(appointment.scheduledAt)} · {appointment.customer.name} · {appointment.serviceName}</option>)}
+                {visits.map((appointment) => <option key={appointment.visitKey} value={appointment.primaryAppointmentId}>{dateLabel(appointment.scheduledAt)} · {appointment.customer?.name ?? "Unknown customer"} · {appointment.displayServiceSummary}</option>)}
               </select>
             </label>
             <label>Vehicle<select name="vehicleId">{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.customer.name} · {vehicle.make} {vehicle.model}</option>)}</select></label>
@@ -118,7 +121,7 @@ export default async function CalendarPage() {
             <h2>Delete Appointment</h2>
             <label>Appointment
               <select name="id">
-                {appointments.map((appointment) => <option key={appointment.id} value={appointment.id}>{dateLabel(appointment.scheduledAt)} · {appointment.customer.name} · {appointment.serviceName}</option>)}
+                {visits.map((appointment) => <option key={appointment.visitKey} value={appointment.primaryAppointmentId}>{dateLabel(appointment.scheduledAt)} · {appointment.customer?.name ?? "Unknown customer"} · {appointment.displayServiceSummary}</option>)}
               </select>
             </label>
             <button className="button danger-button" type="submit">Delete appointment</button>

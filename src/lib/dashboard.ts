@@ -9,19 +9,15 @@ import type {
   ReminderLog,
   Service,
   ServiceRecord,
-  Technician,
   Vehicle
 } from "@prisma/client";
+import { getVehicleVisitAppointments, type AppointmentWithRelations } from "@/lib/appointments";
 import { inventoryRunout, maintenancePrediction, type MaintenanceWithVehicle } from "@/lib/predictions";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAILY_CAPACITY_MINUTES = 8 * 60;
 
-export type DashboardAppointment = Appointment & {
-  customer?: Customer | null;
-  vehicle?: Vehicle | null;
-  technician?: Technician | null;
-};
+export type DashboardAppointment = AppointmentWithRelations;
 
 export type DashboardMaintenance = MaintenanceItem & {
   vehicle: Vehicle & {
@@ -237,12 +233,13 @@ export function getVehiclesRequiringAttention(rows: DashboardMaintenanceRow[], a
 export function getTodayShopSnapshot(appointments: DashboardAppointment[], vehicleCards: VehicleAttentionCard[], asOf = new Date()) {
   const today = startOfDay(asOf);
   const tomorrow = addDays(today, 1);
-  const todayAppointments = appointments.filter((appointment) =>
+  const visits = getVehicleVisitAppointments(appointments);
+  const todayAppointments = visits.filter((appointment) =>
     appointment.status === "BOOKED" && appointment.scheduledAt >= today && appointment.scheduledAt < tomorrow
   );
   const bookedMinutesToday = todayAppointments.reduce((sum, appointment) => sum + appointment.durationMinutes, 0);
   const nextWeek = addDays(today, 7);
-  const bookedMinutesNext7 = appointments
+  const bookedMinutesNext7 = visits
     .filter((appointment) => appointment.status === "BOOKED" && appointment.scheduledAt >= today && appointment.scheduledAt < nextWeek)
     .reduce((sum, appointment) => sum + appointment.durationMinutes, 0);
   const capacityNext7 = DAILY_CAPACITY_MINUTES * 7;
@@ -266,7 +263,8 @@ export function getRevenuePipeline(
   asOf = new Date()
 ) {
   const next30 = addDays(asOf, 30);
-  const bookedRevenue = appointments
+  const visits = getVehicleVisitAppointments(appointments);
+  const bookedRevenue = visits
     .filter((appointment) => appointment.status === "BOOKED" && appointment.scheduledAt >= asOf && appointment.scheduledAt <= next30)
     .reduce((sum, appointment) => sum + appointment.estimatedRevenue, 0);
   const predictedRevenue = vehicleCards
@@ -290,9 +288,10 @@ export function getRevenuePipeline(
 
 export function getRevenueForecast(appointments: DashboardAppointment[], vehicleCards: VehicleAttentionCard[], asOf = new Date()) {
   const today = startOfDay(asOf);
+  const visits = getVehicleVisitAppointments(appointments);
   return Array.from({ length: 13 }, (_, index) => {
     const start = addDays(today, index * 7);
-    const booked = appointments
+    const booked = visits
       .filter((appointment) => appointment.status === "BOOKED" && appointment.scheduledAt >= today && appointment.scheduledAt <= start)
       .reduce((sum, appointment) => sum + appointment.estimatedRevenue, 0);
     const predicted = vehicleCards
@@ -348,10 +347,11 @@ export function getRevenueByServiceType(rows: DashboardMaintenanceRow[]) {
 
 export function getCapacityForecast(appointments: DashboardAppointment[], asOf = new Date()) {
   const today = startOfDay(asOf);
+  const visits = getVehicleVisitAppointments(appointments);
   return Array.from({ length: 14 }, (_, index) => {
     const start = addDays(today, index);
     const end = addDays(start, 1);
-    const scheduledMinutes = appointments
+    const scheduledMinutes = visits
       .filter((appointment) => appointment.status === "BOOKED" && appointment.scheduledAt >= start && appointment.scheduledAt < end)
       .reduce((sum, appointment) => sum + appointment.durationMinutes, 0);
     const availableMinutes = Math.max(0, DAILY_CAPACITY_MINUTES - scheduledMinutes);

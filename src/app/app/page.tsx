@@ -11,6 +11,7 @@ import {
   Wrench
 } from "lucide-react";
 import { createAppointmentAction, sendMockReminderAction } from "@/lib/actions";
+import { getVehicleVisitAppointments } from "@/lib/appointments";
 import { requireUser } from "@/lib/auth";
 import {
   getCapacityForecast,
@@ -52,16 +53,16 @@ function vehicleName(card: VehicleAttentionCard) {
 
 function AppointmentForm({ card, label = "Book Appointment" }: { card: VehicleAttentionCard; label?: string }) {
   const service = card.attentionRows[0]?.item.name ?? "Maintenance service";
-  const revenue = card.attentionRows[0]?.item.averagePrice ?? card.opportunityValue;
   return (
     <form action={createAppointmentAction}>
       <input type="hidden" name="customerId" value={card.customer.id} />
       <input type="hidden" name="vehicleId" value={card.vehicle.id} />
       <input type="hidden" name="scheduledAt" value={dateTimeInputValue(nextAppointmentTime())} />
-      <input type="hidden" name="durationMinutes" value={60} />
+      <input type="hidden" name="estimatedDurationMinutes" value={45} />
       <input type="hidden" name="serviceName" value={service} />
-      <input type="hidden" name="estimatedRevenue" value={revenue} />
-      <input type="hidden" name="notes" value={`Booked from dashboard opportunity for ${service}.`} />
+      <input type="hidden" name="estimatedRevenue" value={card.opportunityValue} />
+      {card.attentionRows.map((row) => <input key={row.item.id} type="hidden" name="maintenanceIds" value={row.item.id} />)}
+      <input type="hidden" name="notes" value={`Booked from dashboard opportunity for ${card.attentionRows.length || 1} service(s).`} />
       <button className="button secondary" type="submit"><CalendarPlus /> {label}</button>
     </form>
   );
@@ -146,7 +147,7 @@ export default async function DashboardPage() {
     prisma.appointment.findMany({
       where: { shopId: user.shopId },
       orderBy: { scheduledAt: "asc" },
-      include: { customer: true, vehicle: true, technician: true }
+      include: { customer: true, vehicle: true, technician: true, services: true }
     }),
     prisma.maintenanceItem.findMany({
       where: { vehicle: { customer: { shopId: user.shopId } } },
@@ -191,13 +192,9 @@ export default async function DashboardPage() {
   const revenueByService = getRevenueByServiceType(maintenanceRows);
   const capacityForecast = getCapacityForecast(appointments, asOf);
   const inventoryAlerts = getLowInventoryAlerts(inventory);
-  const upcoming = Array.from(
-    new Map(
-      appointments
-        .filter((appointment) => appointment.scheduledAt >= asOf && appointment.status === "BOOKED")
-        .map((appointment) => [appointment.id, appointment])
-    ).values()
-  ).slice(0, 5);
+  const upcoming = getVehicleVisitAppointments(appointments)
+    .filter((appointment) => appointment.scheduledAt >= asOf && appointment.status === "BOOKED")
+    .slice(0, 5);
   const maxStatus = Math.max(maintenanceStatus.healthy, maintenanceStatus.dueSoon, maintenanceStatus.overdue, 1);
   const maxServiceRevenue = Math.max(1, ...revenueByService.map((item) => item.revenue));
   const maintenanceConversion = pipeline.totalOpportunity > 0 ? Math.round((pipeline.bookedRevenue / pipeline.totalOpportunity) * 100) : 0;
@@ -301,13 +298,14 @@ export default async function DashboardPage() {
           </div>
           <div className="appointment-compact-list">
             {upcoming.length ? upcoming.map((appointment) => (
-              <div className="compact-appointment" key={appointment.id}>
+              <Link className="compact-appointment appointment-visit-link" href={`/app/appointments/${appointment.primaryAppointmentId}`} key={appointment.visitKey}>
                 <strong>{dateLabel(appointment.scheduledAt)} · {appointment.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</strong>
                 <span>{appointment.customer?.name ?? "Unknown customer"}</span>
                 <span>{appointment.vehicle ? `${appointment.vehicle.year} ${appointment.vehicle.make} ${appointment.vehicle.model}` : "Unknown vehicle"}</span>
-                <span>{appointment.serviceName}</span>
-                <strong>{money.format(appointment.estimatedRevenue)}</strong>
-              </div>
+                <span>{appointment.displayServiceSummary}</span>
+                <span>{appointment.serviceCount} Services · {money.format(appointment.totalValue)} · {appointment.displayDuration}</span>
+                <span>{appointment.technician?.name ?? "Unassigned"} · {appointment.status}</span>
+              </Link>
             )) : (
               <div className="empty-state">
                 <p>No upcoming appointments. Book an opportunity from the maintenance queue.</p>

@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/auth";
 import { sendMockReminderAction } from "@/lib/actions";
+import { getVehicleVisitAppointments } from "@/lib/appointments";
 import { prisma } from "@/lib/prisma";
 import { buildMaintenanceQueue, type MaintenanceQueueSource } from "@/lib/maintenanceQueue";
 import { calculateForecast, type MaintenanceWithVehicle } from "@/lib/predictions";
@@ -12,18 +13,19 @@ export default async function ForecastPage() {
       where: { vehicle: { customer: { shopId: user.shopId } } },
       include: { vehicle: { include: { customer: true, mileageLogs: true } } }
     }),
-    prisma.appointment.findMany({ where: { shopId: user.shopId } }),
+    prisma.appointment.findMany({ where: { shopId: user.shopId }, include: { services: true } }),
     prisma.deferredOpportunity.findMany({
       where: { shopId: user.shopId },
       include: { vehicle: { include: { customer: true } } },
       orderBy: { followUpDate: "asc" }
     })
   ]);
+  const vehicleVisitAppointments = getVehicleVisitAppointments(appointments);
   const queue = buildMaintenanceQueue(maintenance as MaintenanceQueueSource[]);
   const forecast = calculateForecast({
     maintenance: maintenance as MaintenanceWithVehicle[],
     predicted: queue.rows,
-    appointments,
+    appointments: vehicleVisitAppointments,
     opportunities
   });
   const topPredicted = queue.opportunityRows

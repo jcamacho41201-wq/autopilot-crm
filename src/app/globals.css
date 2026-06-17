@@ -565,12 +565,24 @@ textarea {
 }
 
 .appointment-chip {
+  display: block;
   margin-top: 8px;
   padding: 9px;
   border-radius: 8px;
   background: #eeedfe;
   color: #26215c;
   font-size: 0.86rem;
+}
+
+.appointment-visit-link {
+  text-decoration: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.appointment-visit-link:hover {
+  border-color: var(--brand);
+  box-shadow: 0 10px 24px rgba(20, 184, 166, 0.12);
+  transform: translateY(-1px);
 }
 
 .split {

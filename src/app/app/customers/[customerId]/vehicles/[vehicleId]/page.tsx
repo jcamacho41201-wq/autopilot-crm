@@ -509,15 +509,33 @@ export default async function VehicleDashboardPage({
                   <button className="button secondary" type="submit"><CheckCircle2 /> Create record</button>
                 </form>
               </details>
-              <form action={createAppointmentAction}>
-                <input type="hidden" name="customerId" value={vehicle.customerId} />
-                <input type="hidden" name="vehicleId" value={vehicle.id} />
-                <input type="hidden" name="scheduledAt" value={dateTimeInputValue(nextAppointmentTime())} />
-                <input type="hidden" name="durationMinutes" value={60} />
-                <input type="hidden" name="serviceName" value={highestPriority?.item.name ?? "Vehicle service"} />
-                <input type="hidden" name="estimatedRevenue" value={highestPriority?.item.averagePrice ?? 0} />
-                <button className="button secondary" type="submit"><CalendarPlus /> Book Appointment</button>
-              </form>
+              <details className="inline-details appointment-booking-details">
+                <summary className="button secondary"><CalendarPlus /> Book Appointment</summary>
+                <form className="form compact-form" action={createAppointmentAction}>
+                  <input type="hidden" name="customerId" value={vehicle.customerId} />
+                  <input type="hidden" name="vehicleId" value={vehicle.id} />
+                  <input type="hidden" name="serviceName" value={highestPriority?.item.name ?? "Vehicle service"} />
+                  <input type="hidden" name="estimatedRevenue" value={potentialRevenue || highestPriority?.item.averagePrice || 0} />
+                  <input type="hidden" name="estimatedDurationMinutes" value={45} />
+                  <div className="card">
+                    <strong>{opportunityRows.length || 1} service{opportunityRows.length === 1 ? "" : "s"}</strong>
+                    <p>{money.format(potentialRevenue || highestPriority?.item.averagePrice || 0)} total opportunity.</p>
+                  </div>
+                  {opportunityRows.length ? (
+                    <div className="checkbox-grid">
+                      {opportunityRows.map(({ item }) => (
+                        <label className="checkbox-row" key={item.id}>
+                          <input type="checkbox" name="maintenanceIds" value={item.id} defaultChecked />
+                          {item.service?.name ?? item.name} · {money.format(item.averagePrice)} · 45 min
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
+                  <label>When<input name="scheduledAt" type="datetime-local" defaultValue={dateTimeInputValue(nextAppointmentTime())} /></label>
+                  <label>Notes<textarea name="notes" defaultValue={`Booked from vehicle dashboard for ${vehicle.year} ${vehicle.make} ${vehicle.model}.`} /></label>
+                  <button className="button" type="submit"><CalendarPlus /> Book vehicle visit</button>
+                </form>
+              </details>
               {highestPriority ? (
                 <form action={sendMockReminderAction}>
                   <input type="hidden" name="maintenanceId" value={highestPriority.item.id} />

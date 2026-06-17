@@ -47,30 +47,36 @@ function communicationQueue(cards: ReturnType<typeof buildMaintenanceQueue>["car
   return { noReminder, reminded, overdueNoReminder };
 }
 
-function AppointmentForm({
-  customerId,
-  vehicleId,
-  serviceName,
-  revenue,
-  label = "Book Appointment"
-}: {
-  customerId: string;
-  vehicleId: string;
-  serviceName: string;
-  revenue: number;
-  label?: string;
-}) {
+type MaintenanceQueueCard = ReturnType<typeof buildMaintenanceQueue>["cards"][number];
+
+function AppointmentForm({ card, label = "Book Appointment" }: { card: MaintenanceQueueCard; label?: string }) {
+  const primaryService = card.highestPriority?.item.name ?? "Maintenance service";
   return (
-    <form action={createAppointmentAction}>
-      <input type="hidden" name="customerId" value={customerId} />
-      <input type="hidden" name="vehicleId" value={vehicleId} />
-      <input type="hidden" name="scheduledAt" value={dateTimeInputValue(nextAppointmentTime())} />
-      <input type="hidden" name="durationMinutes" value={60} />
-      <input type="hidden" name="serviceName" value={serviceName} />
-      <input type="hidden" name="estimatedRevenue" value={revenue} />
-      <input type="hidden" name="notes" value={`Booked from maintenance revenue pipeline for ${serviceName}.`} />
-      <button className="button secondary" type="submit"><CalendarPlus /> {label}</button>
-    </form>
+    <details className="inline-details appointment-booking-details">
+      <summary className="button secondary"><CalendarPlus /> {label}</summary>
+      <form className="form compact-form" action={createAppointmentAction}>
+        <input type="hidden" name="customerId" value={card.customer.id} />
+        <input type="hidden" name="vehicleId" value={card.vehicle.id} />
+        <input type="hidden" name="serviceName" value={primaryService} />
+        <input type="hidden" name="estimatedRevenue" value={card.potentialRevenue} />
+        <input type="hidden" name="estimatedDurationMinutes" value={45} />
+        <div className="card">
+          <strong>{card.opportunityRows.length} services</strong>
+          <p>{money.format(card.potentialRevenue)} total opportunity · about {Math.round((card.opportunityRows.length * 45) / 60 * 10) / 10} hours</p>
+        </div>
+        <div className="checkbox-grid">
+          {card.opportunityRows.map(({ item }) => (
+            <label className="checkbox-row" key={item.id}>
+              <input type="checkbox" name="maintenanceIds" value={item.id} defaultChecked />
+              {item.service?.name ?? item.name} · {money.format(item.averagePrice)} · 45 min
+            </label>
+          ))}
+        </div>
+        <label>When<input name="scheduledAt" type="datetime-local" defaultValue={dateTimeInputValue(nextAppointmentTime())} /></label>
+        <label>Notes<textarea name="notes" defaultValue={`Booked from maintenance revenue pipeline for ${card.opportunityRows.length} service(s).`} /></label>
+        <button className="button" type="submit"><CalendarPlus /> Book vehicle visit</button>
+      </form>
+    </details>
   );
 }
 
@@ -150,8 +156,6 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
           <div className="contact-card-grid">
             {queue.cards.length ? queue.cards.map((card, index) => {
               const highest = card.highestPriority;
-              const primaryService = highest?.item.name ?? "Maintenance service";
-              const primaryRevenue = highest?.item.averagePrice ?? card.potentialRevenue;
               const priorityTone = card.overdueCount ? "danger" : "warn";
               return (
                 <details className="contact-priority-card" key={card.vehicle.id} open={index === 0}>
@@ -175,7 +179,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                   <div className="queue-actions">
                     <Link className="button secondary" href={`/app/customers/${card.customer.id}/vehicles/${card.vehicle.id}`}><Wrench /> Open Vehicle</Link>
                     <ReminderForm maintenanceId={highest?.item.id} />
-                    <AppointmentForm customerId={card.customer.id} vehicleId={card.vehicle.id} serviceName={primaryService} revenue={primaryRevenue} />
+                    <AppointmentForm card={card} />
                   </div>
                   <div className="table-wrap">
                     <table>

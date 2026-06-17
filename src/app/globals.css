@@ -305,6 +305,16 @@ p {
   box-shadow: var(--shadow);
 }
 
+.clickable-card {
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.clickable-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(107, 98, 212, 0.42);
+  box-shadow: 0 16px 36px rgba(12, 12, 15, 0.12);
+}
+
 .panel {
   padding: 18px;
 }

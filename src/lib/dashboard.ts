@@ -69,6 +69,8 @@ export type VehicleAttentionCard = {
   priorityLabel: string;
   nextDueLabel: string;
   nextBestAction: "Send Reminder" | "Book Appointment" | "View Appointment" | "Open Vehicle";
+  opportunityStatus: "Needs Attention" | "Reminder Sent" | "Customer Contacted" | "Appointment Scheduled" | "Completed" | "Declined";
+  opportunityDate: Date;
   primaryMaintenanceId: string | null;
   lastVisit: Date | null;
 };
@@ -183,6 +185,14 @@ export function getVehiclesRequiringAttention(rows: DashboardMaintenanceRow[], a
       const hasAppointment = activeAppointmentsByVehicle.has(vehicle.id);
       const healthScore = vehicleHealthScore({ vehicleRows, overdueCount, dueCount, dueSoonCount, lastVisit, asOf });
       const customerPriority = priorityScore({ overdueCount, dueCount, dueSoonCount, opportunityValue, healthScore, latestReminder, lastVisit, hasAppointment, asOf });
+      const opportunityDate = overdueCount ? asOf : attentionRows[0]?.prediction.dueDate ?? asOf;
+      const opportunityStatus = hasAppointment
+        ? "Appointment Scheduled"
+        : latestReminder && latestReminder.status === "SKIPPED"
+          ? "Customer Contacted"
+          : latestReminder
+            ? "Reminder Sent"
+            : "Needs Attention";
       const nextBestAction = hasAppointment
         ? "View Appointment"
         : attentionRows.length && !recentlyReminded
@@ -208,6 +218,8 @@ export function getVehiclesRequiringAttention(rows: DashboardMaintenanceRow[], a
         priorityLabel: overdueCount ? "Overdue" : dueCount + dueSoonCount ? "Due soon" : vehicleRows.length ? "Healthy" : "No data",
         nextDueLabel: overdueCount ? "Overdue" : attentionRows[0] ? attentionRows[0].prediction.dueDate.toISOString() : "Healthy",
         nextBestAction,
+        opportunityStatus,
+        opportunityDate,
         primaryMaintenanceId,
         lastVisit
       } satisfies VehicleAttentionCard;
@@ -249,7 +261,7 @@ export function getTodayShopSnapshot(appointments: DashboardAppointment[], vehic
 
 export function getRevenuePipeline(
   appointments: DashboardAppointment[],
-  rows: DashboardMaintenanceRow[],
+  vehicleCards: VehicleAttentionCard[],
   opportunities: DashboardOpportunity[],
   asOf = new Date()
 ) {
@@ -257,12 +269,12 @@ export function getRevenuePipeline(
   const bookedRevenue = appointments
     .filter((appointment) => appointment.status === "BOOKED" && appointment.scheduledAt >= asOf && appointment.scheduledAt <= next30)
     .reduce((sum, appointment) => sum + appointment.estimatedRevenue, 0);
-  const predictedRevenue = rows
-    .filter((row) => row.prediction.dueDate >= asOf && row.prediction.dueDate <= next30 && isAttentionStatus(row.prediction.status))
-    .reduce((sum, row) => sum + row.item.averagePrice, 0);
-  const overdueRevenue = rows
-    .filter((row) => row.prediction.status === "Overdue")
-    .reduce((sum, row) => sum + row.item.averagePrice, 0);
+  const predictedRevenue = vehicleCards
+    .filter((card) => card.overdueCount === 0 && card.opportunityDate >= asOf && card.opportunityDate <= next30)
+    .reduce((sum, card) => sum + card.opportunityValue, 0);
+  const overdueRevenue = vehicleCards
+    .filter((card) => card.overdueCount > 0)
+    .reduce((sum, card) => sum + card.opportunityValue, 0);
   const deferredRevenue = opportunities
     .filter((opportunity) => opportunity.status === "OPEN")
     .reduce((sum, opportunity) => sum + opportunity.estimatedRevenue, 0);
@@ -276,19 +288,19 @@ export function getRevenuePipeline(
   };
 }
 
-export function getRevenueForecast(appointments: DashboardAppointment[], rows: DashboardMaintenanceRow[], asOf = new Date()) {
+export function getRevenueForecast(appointments: DashboardAppointment[], vehicleCards: VehicleAttentionCard[], asOf = new Date()) {
   const today = startOfDay(asOf);
   return Array.from({ length: 13 }, (_, index) => {
     const start = addDays(today, index * 7);
     const booked = appointments
       .filter((appointment) => appointment.status === "BOOKED" && appointment.scheduledAt >= today && appointment.scheduledAt <= start)
       .reduce((sum, appointment) => sum + appointment.estimatedRevenue, 0);
-    const predicted = rows
-      .filter((row) => isAttentionStatus(row.prediction.status) && row.prediction.status !== "Overdue" && row.prediction.dueDate >= today && row.prediction.dueDate <= start)
-      .reduce((sum, row) => sum + row.item.averagePrice, 0);
-    const overdue = rows
-      .filter((row) => row.prediction.status === "Overdue")
-      .reduce((sum, row) => sum + row.item.averagePrice, 0);
+    const predicted = vehicleCards
+      .filter((card) => card.overdueCount === 0 && card.opportunityDate >= today && card.opportunityDate <= start)
+      .reduce((sum, card) => sum + card.opportunityValue, 0);
+    const overdue = vehicleCards
+      .filter((card) => card.overdueCount > 0)
+      .reduce((sum, card) => sum + card.opportunityValue, 0);
     return {
       start,
       booked,

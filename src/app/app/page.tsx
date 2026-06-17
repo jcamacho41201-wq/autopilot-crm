@@ -185,8 +185,8 @@ export default async function DashboardPage() {
   const maintenanceRows = getMaintenanceRows(maintenance.filter((item) => item.serviceId), asOf);
   const vehicleCards = getVehiclesRequiringAttention(maintenanceRows, appointments, asOf);
   const snapshot = getTodayShopSnapshot(appointments, vehicleCards, asOf);
-  const pipeline = getRevenuePipeline(appointments, maintenanceRows, opportunities, asOf);
-  const revenueForecast = getRevenueForecast(appointments, maintenanceRows, asOf);
+  const pipeline = getRevenuePipeline(appointments, vehicleCards, opportunities, asOf);
+  const revenueForecast = getRevenueForecast(appointments, vehicleCards, asOf);
   const maintenanceStatus = getMaintenanceStatusBreakdown(maintenanceRows);
   const revenueByService = getRevenueByServiceType(maintenanceRows);
   const capacityForecast = getCapacityForecast(appointments, asOf);
@@ -227,21 +227,21 @@ export default async function DashboardPage() {
       </header>
 
       <section className="grid grid-4">
-        <div className="card stat"><span className="muted">Cars Scheduled Today</span><strong>{snapshot.carsScheduledToday}</strong><span className="badge">{money.format(snapshot.bookedRevenueToday)} booked today</span></div>
-        <div className="card stat"><span className="muted">Open Bays / Capacity</span><strong>{snapshot.openMinutesToday} min open</strong><span className="badge">{snapshot.utilizationToday}% utilized today</span></div>
-        <div className="card stat"><span className="muted">Ready To Remind</span><strong>{snapshot.readyToRemind}</strong><span className="badge warn">customers</span></div>
-        <div className="card stat"><span className="muted">Calendar Utilization</span><strong>{snapshot.calendarUtilization}%</strong><span className="badge">Next 7 days</span></div>
+        <Link className="card stat clickable-card" href="/app/calendar"><span className="muted">Cars Scheduled Today</span><strong>{snapshot.carsScheduledToday}</strong><span className="badge">{money.format(snapshot.bookedRevenueToday)} booked today</span></Link>
+        <Link className="card stat clickable-card" href="/app/calendar"><span className="muted">Open Bays / Capacity</span><strong>{snapshot.openMinutesToday} min open</strong><span className="badge">{snapshot.utilizationToday}% utilized today</span></Link>
+        <Link className="card stat clickable-card" href="/app/reminders"><span className="muted">Ready To Remind</span><strong>{snapshot.readyToRemind}</strong><span className="badge warn">customers</span></Link>
+        <Link className="card stat clickable-card" href="/app/calendar"><span className="muted">Calendar Utilization</span><strong>{snapshot.calendarUtilization}%</strong><span className="badge">Next 7 days</span></Link>
       </section>
 
       <section className="grid grid-5" style={{ marginTop: 16 }}>
-        <div className="card stat"><span className="muted">Booked Revenue</span><strong>{money.format(pipeline.bookedRevenue)}</strong><span className="badge">Calendar confirmed</span></div>
-        <div className="card stat"><span className="muted">Predicted Revenue</span><strong>{money.format(pipeline.predictedRevenue)}</strong><span className="badge ok">Next 30 days</span></div>
-        <div className="card stat"><span className="muted">Overdue Revenue</span><strong>{money.format(pipeline.overdueRevenue)}</strong><span className="badge danger">Needs action</span></div>
-        <div className="card stat"><span className="muted">Total Opportunity</span><strong>{money.format(pipeline.totalOpportunity)}</strong><span className="badge warn">Open pipeline</span></div>
-        <div className="card stat"><span className="muted">Maintenance Conversion</span><strong>{maintenanceConversion}%</strong><span className="badge ok">Revenue captured</span></div>
+        <Link className="card stat clickable-card" href="/app/calendar"><span className="muted">Booked Revenue</span><strong>{money.format(pipeline.bookedRevenue)}</strong><span className="badge">Calendar confirmed</span></Link>
+        <Link className="card stat clickable-card" href="/app/maintenance"><span className="muted">Predicted Revenue</span><strong>{money.format(pipeline.predictedRevenue)}</strong><span className="badge ok">Vehicle opportunities</span></Link>
+        <Link className="card stat clickable-card" href="/app/maintenance"><span className="muted">Overdue Revenue</span><strong>{money.format(pipeline.overdueRevenue)}</strong><span className="badge danger">Vehicle opportunities</span></Link>
+        <Link className="card stat clickable-card" href="/app/maintenance"><span className="muted">Total Opportunity</span><strong>{money.format(pipeline.totalOpportunity)}</strong><span className="badge warn">{vehicleCards.length} vehicles</span></Link>
+        <Link className="card stat clickable-card" href="/app/forecast"><span className="muted">Maintenance Conversion</span><strong>{maintenanceConversion}%</strong><span className="badge ok">Revenue captured</span></Link>
       </section>
       <section className="grid grid-1" style={{ marginTop: 16 }}>
-        <div className="card stat"><span className="muted">Deferred Opportunity</span><strong>{money.format(pipeline.deferredRevenue)}</strong><span className="badge">{opportunities.length} declined or postponed</span></div>
+        <Link className="card stat clickable-card" href="/app/vehicles"><span className="muted">Deferred Opportunity</span><strong>{money.format(pipeline.deferredRevenue)}</strong><span className="badge">{opportunities.length} declined or postponed</span></Link>
       </section>
 
       <section className="dashboard-grid" style={{ marginTop: 16 }}>
@@ -274,6 +274,7 @@ export default async function DashboardPage() {
                     <span className="badge danger">{card.overdueCount} overdue</span>
                     <span className="badge warn">{card.dueCount + card.dueSoonCount} due soon</span>
                     <span className="badge">{money.format(card.opportunityValue)} opportunity</span>
+                    <span className="badge">{card.opportunityStatus}</span>
                   </div>
                   <div className="queue-preview">
                     <div className="queue-summary">

@@ -398,6 +398,12 @@ p {
   pointer-events: none;
 }
 
+.button:disabled,
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .button.ghost {
   color: var(--brand);
   background: transparent;
@@ -1125,6 +1131,42 @@ textarea {
 .checkbox-row input {
   width: 18px;
   min-height: 18px;
+}
+
+.appointment-booking-panel {
+  min-width: min(560px, calc(100vw - 40px));
+  margin-top: 10px;
+}
+
+.appointment-service-selector {
+  max-height: 340px;
+}
+
+.appointment-service-row {
+  display: grid;
+  grid-template-columns: 18px minmax(180px, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.appointment-service-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.appointment-selection-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-weight: 800;
+  padding: 10px;
 }
 
 .service-toolbar {

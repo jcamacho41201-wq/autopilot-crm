@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { CalendarPlus, MessageSquareText, Send, Wrench } from "lucide-react";
-import { createAppointmentAction, sendMockReminderAction } from "@/lib/actions";
+import { MessageSquareText, Send, Wrench } from "lucide-react";
+import { sendMockReminderAction } from "@/lib/actions";
+import { AppointmentBookingPanel } from "@/app/app/maintenance/appointment-booking-panel";
 import { requireUser } from "@/lib/auth";
 import { dateLabel, dateTimeInputValue, money, number } from "@/lib/format";
 import { buildMaintenanceQueue, isOpenMaintenanceOpportunity, type MaintenanceQueueRow, type MaintenanceQueueSource } from "@/lib/maintenanceQueue";
@@ -49,35 +50,33 @@ function communicationQueue(cards: ReturnType<typeof buildMaintenanceQueue>["car
 
 type MaintenanceQueueCard = ReturnType<typeof buildMaintenanceQueue>["cards"][number];
 
-function AppointmentForm({ card, label = "Book Appointment" }: { card: MaintenanceQueueCard; label?: string }) {
-  const primaryService = card.highestPriority?.item.name ?? "Maintenance service";
-  return (
-    <details className="inline-details appointment-booking-details">
-      <summary className="button secondary"><CalendarPlus /> {label}</summary>
-      <form className="form compact-form" action={createAppointmentAction}>
-        <input type="hidden" name="customerId" value={card.customer.id} />
-        <input type="hidden" name="vehicleId" value={card.vehicle.id} />
-        <input type="hidden" name="serviceName" value={primaryService} />
-        <input type="hidden" name="estimatedRevenue" value={card.potentialRevenue} />
-        <input type="hidden" name="estimatedDurationMinutes" value={45} />
-        <div className="card">
-          <strong>{card.opportunityRows.length} services</strong>
-          <p>{money.format(card.potentialRevenue)} total opportunity · about {Math.round((card.opportunityRows.length * 45) / 60 * 10) / 10} hours</p>
-        </div>
-        <div className="checkbox-grid">
-          {card.opportunityRows.map(({ item }) => (
-            <label className="checkbox-row" key={item.id}>
-              <input type="checkbox" name="maintenanceIds" value={item.id} defaultChecked />
-              {item.service?.name ?? item.name} · {money.format(item.averagePrice)} · 45 min
-            </label>
-          ))}
-        </div>
-        <label>When<input name="scheduledAt" type="datetime-local" defaultValue={dateTimeInputValue(nextAppointmentTime())} /></label>
-        <label>Notes<textarea name="notes" defaultValue={`Booked from maintenance revenue pipeline for ${card.opportunityRows.length} service(s).`} /></label>
-        <button className="button" type="submit"><CalendarPlus /> Book vehicle visit</button>
-      </form>
-    </details>
-  );
+function selectorStatus(status: string) {
+  if (status === "Overdue") return "Overdue";
+  if (status === "Due" || status === "Due Soon") return "Due Soon";
+  return "Healthy";
+}
+
+function selectorStatusRank(status: string) {
+  if (status === "Overdue") return 0;
+  if (status === "Due" || status === "Due Soon") return 1;
+  if (status === "Healthy") return 2;
+  return 3;
+}
+
+function bookingServices(card: MaintenanceQueueCard) {
+  return [...card.rows]
+    .sort((a, b) =>
+      selectorStatusRank(a.prediction.status) - selectorStatusRank(b.prediction.status) ||
+      b.item.averagePrice - a.item.averagePrice
+    )
+    .map(({ item, prediction }) => ({
+      id: item.id,
+      name: item.service?.name ?? item.name,
+      status: selectorStatus(prediction.status),
+      statusTone: prediction.statusTone,
+      estimatedPrice: item.averagePrice,
+      estimatedDurationMinutes: 45
+    }));
 }
 
 function ReminderForm({ maintenanceId, label = "Send Reminder" }: { maintenanceId?: string; label?: string }) {
@@ -104,15 +103,21 @@ function BarRow({ label, value, max, tone = "" }: { label: string; value: number
 
 export default async function MaintenancePage({ searchParams }: { searchParams: { error?: string } }) {
   const user = await requireUser();
-  const maintenance = await prisma.maintenanceItem.findMany({
-    where: { vehicle: { customer: { shopId: user.shopId } } },
-    include: {
-      vehicle: { include: { customer: true, mileageLogs: true } },
-      service: true,
-      reminders: { orderBy: { sentAt: "desc" }, take: 1 }
-    },
-    orderBy: { name: "asc" }
-  });
+  const [maintenance, technicians] = await Promise.all([
+    prisma.maintenanceItem.findMany({
+      where: { vehicle: { customer: { shopId: user.shopId } } },
+      include: {
+        vehicle: { include: { customer: true, mileageLogs: true } },
+        service: true,
+        reminders: { orderBy: { sentAt: "desc" }, take: 1 }
+      },
+      orderBy: { name: "asc" }
+    }),
+    prisma.technician.findMany({
+      where: { shopId: user.shopId },
+      orderBy: { name: "asc" }
+    })
+  ]);
 
   const queue = buildMaintenanceQueue(maintenance as MaintenanceQueueSource[]);
   const revenueByService = serviceRevenue(queue.rows);
@@ -179,7 +184,14 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                   <div className="queue-actions">
                     <Link className="button secondary" href={`/app/customers/${card.customer.id}/vehicles/${card.vehicle.id}`}><Wrench /> Open Vehicle</Link>
                     <ReminderForm maintenanceId={highest?.item.id} />
-                    <AppointmentForm card={card} />
+                    <AppointmentBookingPanel
+                      customerId={card.customer.id}
+                      vehicleId={card.vehicle.id}
+                      vehicleLabel={`${card.vehicle.year} ${card.vehicle.make} ${card.vehicle.model}`}
+                      services={bookingServices(card)}
+                      technicians={technicians.map((technician) => ({ id: technician.id, name: technician.name }))}
+                      defaultScheduledAt={dateTimeInputValue(nextAppointmentTime())}
+                    />
                   </div>
                   <div className="table-wrap">
                     <table>

@@ -72,6 +72,7 @@ function bookingServices(card: MaintenanceQueueCard) {
     .map(({ item, prediction }) => ({
       id: item.id,
       name: item.service?.name ?? item.name,
+      category: item.service?.category ?? null,
       status: selectorStatus(prediction.status),
       statusTone: prediction.statusTone,
       estimatedPrice: item.averagePrice,
@@ -187,7 +188,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                     <AppointmentBookingPanel
                       customerId={card.customer.id}
                       vehicleId={card.vehicle.id}
-                      vehicleLabel={`${card.vehicle.year} ${card.vehicle.make} ${card.vehicle.model}`}
+                      vehicleLabel={`${card.vehicle.year} ${card.vehicle.make} ${card.vehicle.model} · ${card.customer.name}`}
                       services={bookingServices(card)}
                       technicians={technicians.map((technician) => ({ id: technician.id, name: technician.name }))}
                       defaultScheduledAt={dateTimeInputValue(nextAppointmentTime())}

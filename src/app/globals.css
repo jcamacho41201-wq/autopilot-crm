@@ -1133,9 +1133,64 @@ textarea {
   min-height: 18px;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgba(11, 16, 32, 0.62);
+  padding: 20px;
+}
+
+.appointment-modal {
+  width: min(820px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.32);
+  padding: 22px;
+}
+
+.appointment-modal-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.appointment-modal-header h2 {
+  margin: 0;
+}
+
+.appointment-modal-header p {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.modal-close-button {
+  width: 36px;
+  min-height: 36px;
+  background: var(--surface-2);
+  color: var(--ink);
+  flex: 0 0 auto;
+}
+
 .appointment-booking-panel {
-  min-width: min(560px, calc(100vw - 40px));
-  margin-top: 10px;
+  gap: 14px;
+}
+
+.modal-section {
+  display: grid;
+  gap: 8px;
+}
+
+.modal-section h3 {
+  margin: 0;
+  font-size: 0.95rem;
 }
 
 .appointment-service-selector {
@@ -1167,6 +1222,26 @@ textarea {
   color: var(--ink);
   font-weight: 800;
   padding: 10px;
+}
+
+.toast-success {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 90;
+  border: 1px solid #b8efd0;
+  border-radius: 10px;
+  background: #e7f7ed;
+  color: var(--ok);
+  font-weight: 900;
+  box-shadow: var(--shadow);
+  padding: 12px 14px;
+}
+
+@media (max-width: 720px) {
+  .appointment-service-row {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
 }
 
 .service-toolbar {
